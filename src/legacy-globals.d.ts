@@ -158,15 +158,12 @@ declare global {
   var DEFAULT_LEVEL: any;
   var DEFAULT_VOLUME: any;
   var BLOOD_TRAIL_BAKE_EVERY: any;
-  var addKeyHandlers: any;
   var alarmingObjects: any;
   var alert_all_guards: any;
   var alert_clip: any;
   var animate: any;
   var backupCalled: any;
   var bakeBloodTrail: any;
-  var bloodParticleSplatter: any;
-  var blood_speed: any;
   var blood_trail: any;
   var blood_trail_pending: any;
   var blood_trail_sprite: any;
@@ -184,7 +181,6 @@ declare global {
   var bullets: any;
   var camera: any;
   var cameras_disabled: any;
-  var changeFontSizes: any;
   var circProgBar: any;
   var clearStage: any;
   var clickEvent: any;
@@ -205,7 +201,6 @@ declare global {
   var dragDistance: any;
   var drawBloodTrail: any;
   var drop_gun: any;
-  var ejectShell: any;
   var enableLOS: any;
   var explodeBomb: any;
   var fullscreen: any;
@@ -219,7 +214,6 @@ declare global {
   var gameloop_guards: any;
   var gameloop_messages_and_tooltip: any;
   var gameloop_security_cams: any;
-  var gameloop_zoom_and_camera: any;
   var getColor: any;
   var getMapInfo: any;
   var getUrlVars: any;
@@ -235,15 +229,14 @@ declare global {
   var hero_end_aim_coord: any;
   var hero_is_dead: any;
   var hero_last_seen: any;
-  var hero_move_animation_check: any;
-  var hero_moving: any;
   var keys: any;
-  var kickback: any;
-  var kickback_amount: any;
-  var kickback_speed: any;
   var killHero: any;
   var lastTimeStamp: any;
   var latestAlert: any;
+  // Fixed-timestep state (Phase 2): the sim always steps in STEP_MS increments.
+  var STEP_MS: number;
+  var MAX_FRAME_MS: number;
+  var step_accumulator: number;
   var look_sensitivity: any;
   var loot: any;
   var losPathGraphics: any;
@@ -262,8 +255,6 @@ declare global {
   var messageText: any;
   var messages_floating: any;
   var mouse: any;
-  var mouseMove: any;
-  var mouseWheelHandler: any;
   var mouse_relative: any;
   var newFloatingMessage: any;
   var newMessage: any;
@@ -276,17 +267,13 @@ declare global {
   var plantBomb: any;
   var reactionTimeout: any;
   var removeAllChildren: any;
-  var removeHandlers: any;
   var renderer: any;
-  var scaleStageChild: any;
   var security_cameras: any;
   var setBomb: any;
   var setHeroImage: any;
   var set_latestAlert: any;
   var setup_map: any;
-  var shardParticleSplatter: any;
   var shardType: any;
-  var shard_limit: any;
   var shards: any;
   var shell1: any;
   var shell2: any;
@@ -295,7 +282,6 @@ declare global {
   var shell5: any;
   var shellTextures: any;
   var shellType: any;
-  var shell_speed: any;
   var shells: any;
   var show_sprite_tooltips: any;
   var spawn_backup: any;
@@ -312,7 +298,6 @@ declare global {
   var states: any;
   var static_effect_sprites: any;
   var stats: any;
-  var tickParticle: any;
   var tooltip: any;
   var tooltipshown: any;
   var unsilenced_gun: any;
@@ -337,9 +322,7 @@ declare global {
   var currentShard: any;
   var mouse_click_obj: any;
   var percent: any;
-  var shard: any;
   var shardImages: any;
-  var shell: any;
 
   // Sprite-sheet frame handles, all assigned in images_from_sheet.ts:onAssetsLoaded().
   var img_blue: any;

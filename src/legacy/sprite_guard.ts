@@ -3,6 +3,7 @@ Copyright 2014,2015, Jordan O'Leary, All rights reserved.
 If you would like to copy or use my code, you may contact
 me at jdoleary@gmail.com
 /*******************************************************/
+import { gameClock } from '../core/clock';
 function sprite_guard_wrapper(pixiSprite, hasRiotShield){
     function sprite_guard(hasRiotShield){
         this.path = [];//path applies to AI following a path;
@@ -28,7 +29,7 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         //Patrol repath throttling.
         //Without this, a guard with an empty path runs a full A* every single frame, and a
         //destination inside a sealed room (which never yields a path) makes that loop forever.
-        this.patrolRetryAt = 0;//timestamp (ms) before which getRandomPatrolPath() is a no-op
+        this.patrolRetryAt = 0;//gameClock time (ms) before which getRandomPatrolPath() is a no-op
         this.patrolFailStreak = 0;//consecutive searches that returned no path, drives the backoff
 
         //Add all sprites to sprite container
@@ -77,7 +78,8 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         this.getRandomPatrolPath = function(){
             //finds a path to patrol
 
-            var now = performance.now();
+            //game time, not wall time: the backoff must not burn down while paused
+            var now = gameClock.now();
             //throttled: too soon since the last search (or still backing off from a failure)
             if(now < this.patrolRetryAt)return;
 
@@ -134,20 +136,20 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
                 // Guards don't react instantly, they need a second to comprehend what they saw
                 // This prevents shield guards from pulling out their shield the moment they see you
                 this.alarmedPre = true;
-                setTimeout(() => {
+                gameClock.after(this.reactionTimeMillis, () => {
                     this.becomeAlarmed()
-                    
+
                     this.path = [];//empty path
                     this.moving = false;//this sprite stop in their tracks when they see otherSprite.
-                    
-                    //in 3 seconds, if this guard is still alive, alert the others.
-                    setTimeout(function(){
+
+                    //in 2 seconds, if this guard is still alive, alert the others.
+                    gameClock.after(2000, function(){
                         if(this.alive && !this.being_choked_out){
                             newMessage('All the other guards are on alert!');
                             alert_all_guards();
                         };
-                    }.bind(this), 2000);
-                }, this.reactionTimeMillis)
+                    }.bind(this));
+                })
             }
 
             
