@@ -3,6 +3,8 @@ Copyright 2014,2015, Jordan O'Leary, All rights reserved.
 If you would like to copy or use my code, you may contact
 me at jdoleary@gmail.com
 /*******************************************************/
+import { events } from '../core/events';
+import { physics } from '../physics';
 //also referred to as "cell"
 window.walls = {
     black:{
@@ -209,17 +211,30 @@ function jo_wall(image_number,solid,blocks_vision,restricted,vertices,grid_index
     }
     
     
+    //Flat index into grid.cells / the nav layers / the physics fixture table. All three
+    //use the same `width * y + x` layout.
+    this.cellIndex = function(){
+        return grid.width * this.grid_index_y + this.grid_index_x;
+    }
+
     //Corresponding door_sprite is responsible for opening and closing this "door"
     //these two functions don't affect the door sprite only the door tile:
+    //
+    //One call site, three consumers: the grid flags (what the fog occluders are derived
+    //from), the physics fixture (sensor + transparent when open, solid + opaque when
+    //closed) and the fog cache. Before Phase 4 the flags were the only thing that moved,
+    //which is exactly why the fog could not have been switched on.
     this.openDoor = function(){
         this.solid = false;
         this.blocks_vision = false;
-    
+        physics.setDoorOpen(this.cellIndex(), true);
+        events.emit('vision:dirty');
     }
     this.closeDoor = function(){
         this.solid = true;
         this.blocks_vision = true;
-    
+        physics.setDoorOpen(this.cellIndex(), false);
+        events.emit('vision:dirty');
     }
     
     

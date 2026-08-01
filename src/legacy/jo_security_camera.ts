@@ -24,8 +24,6 @@ function security_camera_wrapper(pixiSprite,x,y,maxswivel,minswivel){
         
         this.radius = 14;
         this.alarmed = false;
-        this.losPath = [];
-        this.losPoints = [];
         //change anchor:
         this.sprite.anchor.x = 0.35;
         
@@ -44,8 +42,6 @@ function security_camera_wrapper(pixiSprite,x,y,maxswivel,minswivel){
         this.rad = this.min;//set rotation to min swivel
         
         
-        //debug info
-        this.draw_los_circles = false;
         /*
         The range of motion of rotation is 0 - 360
         
@@ -163,74 +159,12 @@ function security_camera_wrapper(pixiSprite,x,y,maxswivel,minswivel){
             }
             return {corner:corner,touching_door:touching_door,number_of_blocks_vision:number_of_blocks_vision};
         }
-        //called once to get points to consider for LOS calculations
-        
-        if(this.draw_los_circles){
-            var circle = new debug_circle();
-            circle.alpha = 0.5;
-        }
-        this.setupLOS = function(){
-            var true_corners = 0;
-            for(var c = 0; c < grid.cells.length; c++){
-                /*var array = [grid.cells[c].v2,grid.cells[c].v4,grid.cells[c].v6,grid.cells[c].v8];
-                for(var a = 0; a < array.length; a++){
-                    //get all 4 cells on the corner of this point:
-                }*/
-                //i should only have to use v2 to avoid duplication:
-                var cell = grid.cells[c];
-                var cornerOb = findCorner(cell.v2);
-                var corner = cornerOb.corner;
-                var touching_door = cornerOb.touching_door;
-                var number_of_blocks_vision = cornerOb.number_of_blocks_vision;
-                
-                //allows for corner on closed doors
-                if(number_of_blocks_vision == 2 && touching_door)number_of_blocks_vision--;
-                //if not even, it is a true corner point used for vision masking:
-                if(number_of_blocks_vision%2!=0){
-                    //later,circle.color = 0x00ff00;
-                    //later, to account for offset: circle.draw(cell.v2.x,cell.v2.y,5);
-                    /*        
-                    {
-                        true_point: {x,y},
-                        angle: 234
-                    }*/
-                    //if it is an outer corner, add two points, one that will cast a ray, and another that uses the true corner
-                    if(number_of_blocks_vision == 1){
-                        var offset = findOffset(corner);
-                        if(lineOfSightIgnoreDoor(this.losx,this.losy,cell.v2.x,cell.v2.y)){
-                            this.losPoints.push({noray:true,true_point:{x:cell.v2.x-offset.x,y:cell.v2.y-offset.y},angle:0});//for rendering LOS
-                            this.losPoints.push({true_point:{x:cell.v2.x+offset.x,y:cell.v2.y+offset.y},angle:0});//for rendering LOS
-                            if(this.draw_los_circles){
-                                circle.color = 0x00ff00;
-                                circle.draw(cell.v2.x+offset.x,cell.v2.y+offset.y,4,true);
-                            }
-                        }
-                    }else{
-                        if(lineOfSightIgnoreDoor(this.losx,this.losy,cell.v2.x,cell.v2.y)){
-                            this.losPoints.push({true_point:{x:cell.v2.x,y:cell.v2.y},angle:0});//for rendering LOS
-                            if(this.draw_los_circles){
-                                circle.color = 0xff0000;
-                                //ERROR this isn't hitting some corners
-                                circle.draw(cell.v2.x,cell.v2.y,4,true);
-                            }
-                        }else{
-                            if(this.draw_los_circles){
-                                //not reached by LOS
-                                circle.color = 0x0000ff;
-                                circle.draw(cell.v2.x,cell.v2.y,4,true);
-                            }
-                        }
-                    }
-                    
-                    if(lineOfSightIgnoreDoor(this.losx,this.losy,cell.v2.x,cell.v2.y))true_corners++;
-                    /*
-                    True corners are decided once when the game starts.  Relevant corners are decided at runtime and are using to draw the LOS polygon
-                    */
-                }
-            }
-
-            console.log("Security Camera true corners for vision masking: " + true_corners);
-        }
+        //`setupLOS()` lived here: for every one of the 1600 cells it decided whether
+        //the cell's north-west corner was a "true corner" and, if the camera could see
+        //it, cached it for the starburst. Cached once, at map load — so a camera's
+        //visible area could never react to a door, let alone a wall coming down. The fog
+        //renderer sweeps live occluders instead (src/fog/), and a hacked camera just
+        //asks for a cone-limited polygon.
 
     }
     jo_security_camera.prototype = new jo_sprite(pixiSprite);

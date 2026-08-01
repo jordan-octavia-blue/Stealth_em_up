@@ -3,6 +3,7 @@ Copyright 2014,2015, Jordan O'Leary, All rights reserved.
 If you would like to copy or use my code, you may contact
 me at jdoleary@gmail.com
 /*******************************************************/
+import { physics } from '../physics';
 function jo_sprite(pixiSprite, parent){
     //utility variables, these do not affect the actual sprite, but are used for camera and such, see prepare_for_draw()
     this.x = 0;
@@ -66,6 +67,10 @@ function jo_sprite(pixiSprite, parent){
         this.can_shoot = false; //so the guards don't shoot way too fast
     }
 
+    //Sprites that own a physics body (the hero and living guards) are moved by the
+    //solver: this sets a velocity and lets contacts do the rest, which is what deleted
+    //the hand-rolled corner/side pushout further down this file. Everything else —
+    //bullets, dead bodies being dragged, doors — keeps the original direct-move path.
     this.move_to_target = function(){
         //this function uses similar triangles with sides a,b,c and A,B,C where c and C are the hypotenuse
         //the movement of this.x and this.y (a,b) are found with the formulas: A/C = a/c and B/C = b/c
@@ -75,13 +80,18 @@ function jo_sprite(pixiSprite, parent){
         var A = this.target.x-this.x;
         var B = this.target.y-this.y;
         var C = Math.sqrt(A*A+B*B);
-        if(C<this.stop_distance){        
+        var hasBody = physics.hasActor(this);
+        if(C<this.stop_distance){
+            if(hasBody)physics.stop(this);
             return true; // the object is close enough that it need not move
         }
         a = c*A/C;
         b = c*B/C;
-        if(this.moving){
+        if(hasBody){
             //only move the sprite if they are set to moving, for example when guards see hero they will stop in their tracks
+            if(this.moving)physics.steerTowards(this,this.target.x,this.target.y,this.speed,this.stop_distance);
+            else physics.stop(this);
+        }else if(this.moving){
             this.x += a;
             this.y += b;
         }
@@ -210,6 +220,10 @@ function jo_sprite(pixiSprite, parent){
         
     }
     
+    //Line of sight is a physics raycast now (roadmap §3.2): the same VISION_BLOCKER
+    //fixtures that stop bullets, filtered the same way. The grid-DDA raycaster this
+    //replaced walked 40 cell boundaries and silently returned "no wall" past that, so
+    //a long diagonal sightline could report clear through a building.
     this.doesSpriteSeeSprite = function(otherSprite){
         //Check if this sprite sees otherSprite
         var visionConeAngleForotherSprite = this.angleBetweenSprites_relativeToThis(otherSprite);
@@ -217,32 +231,19 @@ function jo_sprite(pixiSprite, parent){
             //if the otherSprite is within the guard's vision cone (1.22 rad ~== 70 degrees)
             //then this sprite will turn red, face otherSprite, and stop moving
             //the otherSprite then only has a few seconds before guard calls backup
-            
+
             //but only if there are no walls between them:
-            var raycast = getRaycastPoint(this.x,this.y,otherSprite.x,otherSprite.y);
-            if(get_distance(this.x,this.y,raycast.x,raycast.y)>=get_distance(this.x,this.y,otherSprite.x,otherSprite.y)){
-                return true;
-            }else return false;
+            return physics.canSee(this.x,this.y,otherSprite.x,otherSprite.y);
         }else return false;
-    
+
     };
     this.isRaycastUnobstructedBetweenThese = function(otherSprite){
         //returns true if there are no walls between these sprites.
-        //only if there are no walls between them:
-        var raycast = getRaycastPoint(this.x,this.y,otherSprite.x,otherSprite.y);
-        if(get_distance(this.x,this.y,raycast.x,raycast.y)>=get_distance(this.x,this.y,otherSprite.x,otherSprite.y)){
-            return true;
-        }else return false;
-        
+        return physics.canSee(this.x,this.y,otherSprite.x,otherSprite.y);
     }
     this.isRaycastUnobstructedBetweenTheseIgnoreDoor = function(otherSprite){
-        //returns true if there are no walls between these sprites.
-        //only if there are no walls between them:
-        var raycast = getRaycastPointIgnoreDoor(this.x,this.y,otherSprite.x,otherSprite.y);
-        if(get_distance(this.x,this.y,raycast.x,raycast.y)>=get_distance(this.x,this.y,otherSprite.x,otherSprite.y)){
-            return true;
-        }else return false;
-        
+        //returns true if there are no walls (doors excepted) between these sprites.
+        return physics.canSeeIgnoringDoors(this.x,this.y,otherSprite.x,otherSprite.y);
     }
     this.prepare_for_draw = function(){
         //var draw_coords = camera.relativePoint(this);
@@ -275,78 +276,18 @@ function jo_sprite(pixiSprite, parent){
         if(result < -Math.PI)result += Math.PI*2;
         return result;
     };
-    //This function will test collision between sprite and coord and 
-    //move the sprite accordingly so that it is no longer colliding
-    this.collide = function(coord){
-        var opp = this.y - coord.y;
-        var adj = this.x - coord.x;
-        var C = Math.sqrt(opp*opp+adj*adj);
-        if ( C >= this.radius)return;
-        
-        var L = this.radius;
-        var Ang = Math.atan2(opp,adj);
-        
-        
-        var x2 = coord.x + (Math.cos(Ang) * L)
-        var y2 = coord.y + (Math.sin(Ang) * L)
-        
-        //set sprite to new coordinates
-        this.x = x2;
-        this.y = y2;
-    };
-    //added 10 to the radius because it looks better
-    this.unit_to_unit_collide = function(coord){
-        var opp = this.y - coord.y;
-        var adj = this.x - coord.x;
-        var C = Math.sqrt(opp*opp+adj*adj);
-        if ( C >= this.radius+10)return;
-        
-        var L = this.radius+10;
-        var Ang = Math.atan2(opp,adj);
-        
-        
-        var x2 = coord.x + (Math.cos(Ang) * L)
-        var y2 = coord.y + (Math.sin(Ang) * L)
-        
-        //set sprite to new coordinates
-        this.x = x2;
-        this.y = y2;
-    };
-    this.collide_with_wall_sides = function(wall){
-        //check for top/bottom side collision
-        //if between left and right side
-        if(this.x < wall.v2.x && this.x > wall.v8.x){
-            //if colliding with top or bottom wall
-            if(this.y + this.radius > wall.v2.y && this.y - this.radius < wall.v4.y){
-                //determine which way to push
-                var how_far_in_v2 = this.y - wall.v2.y;
-                var how_far_in_v4 = wall.v4.y - this.y;
-                if(how_far_in_v2 < how_far_in_v4){
-                    this.y = wall.v2.y-this.radius;
-                }else{
-                    this.y = wall.v4.y+this.radius;
-                }
-                
-            }
-        }
-        
-        //check for left/right side collision
-        //if between top and bottom side
-        if(this.y < wall.v4.y && this.y > wall.v2.y){
-            //if colliding with left or right wall
-            if(this.x + this.radius > wall.v8.x && this.x - this.radius < wall.v2.x){
-                //determine which way to push
-                var how_far_in_v8 = this.x - wall.v8.x;
-                var how_far_in_v2 = wall.v2.x - this.x;
-                if(how_far_in_v8 < how_far_in_v2){
-                    this.x = wall.v8.x-this.radius;
-                }else{
-                    this.x = wall.v2.x+this.radius;
-                }
-                
-            }
-        }
-    };
+    ////////////////////////////////////////////////////////////////////////////
+    // Collision lives in src/physics/ (roadmap §3.2).
+    //
+    // Three functions used to be here and are all gone:
+    //   collide()                 — corner pushout, run by the hero against the four
+    //                               vertices of every one of the 1600 cells, every frame.
+    //   collide_with_wall_sides() — the flat-side half of the same pushout.
+    //   unit_to_unit_collide()    — O(n^2) guard separation.
+    // Box2D's broadphase is the spatial partition this codebase never had, its contact
+    // solver does the pushout, and guards finally collide with walls instead of trusting
+    // the path they were handed.
+    ////////////////////////////////////////////////////////////////////////////
 
 }
 

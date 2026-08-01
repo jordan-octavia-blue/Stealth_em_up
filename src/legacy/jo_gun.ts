@@ -3,6 +3,7 @@ Copyright 2014,2015, Jordan O'Leary, All rights reserved.
 If you would like to copy or use my code, you may contact
 me at jdoleary@gmail.com
 /*******************************************************/
+import { physics } from '../physics';
 function jo_gun(name,clip_size, silenced, automatic, bullets_per_shot, spread){
     this.name = name;
     //Clip_size is the amount of ammo per clip
@@ -47,7 +48,9 @@ function jo_gun(name,clip_size, silenced, automatic, bullets_per_shot, spread){
             var randomRot = randomIntFromInterval(-this.spread/2,this.spread/2);
             //console.log('random rot: ' + randomRot);
             var endPoint = rotate_point_about_axis({x:unit.x,y:unit.y},randomRot,{x:unit.aim.end.x,y:unit.aim.end.y});
-            bullet.target = getRaycastPoint(unit.x,unit.y,endPoint.x,endPoint.y);
+            //where this shot would stop if nobody were in the way; gameloop_bullets
+            //raycasts each step to find out who actually is
+            bullet.target = physics.sightStop(unit.x,unit.y,endPoint.x,endPoint.y);
             bullet.rotate_to_instant(bullet.target.x,bullet.target.y);
             if(this.automatic == true)bullet.speed = randomIntFromInterval(30,80);
             else bullet.speed = 75;

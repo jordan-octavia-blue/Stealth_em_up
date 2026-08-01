@@ -15,6 +15,9 @@
 export {};
 
 declare global {
+  // published by the debug overlays for the console and the headless harness
+  var physics: any;
+  var fog: any;
   // Loose index signature so `window.<legacyName> = ...` type-checks everywhere.
   interface Window {
     [key: string]: any;
@@ -77,10 +80,7 @@ declare global {
   var circle_linesetment_intersect: any;
   var findAngleBetweenPoints: any;
   var get_distance: any;
-  var partition: any;
   var positionInCircle: any;
-  var quickSort: any;
-  var swap: any;
 
   // jo_doodad.ts
   var jo_doodad: any;
@@ -104,15 +104,6 @@ declare global {
 
   // Stats.ts
   var Stats: any;
-
-  // jo_raycast.ts
-  var getRaycastPoint: any;
-  var getRaycastPointIgnoreDoor: any;
-  var lineOfSight: any;
-  var lineOfSightIgnoreDoor: any;
-  var nextPointAlongRay: any;
-  var raycast_horiz: any;
-  var raycast_virt: any;
 
   // jo_security_camera.ts
   var security_camera_wrapper: any;
@@ -181,7 +172,6 @@ declare global {
   var clickEvent: any;
   var computer_for_security_cameras: any;
   var currentTexture: any;
-  var debug_LOS_starburst: any;
   var debug_info: any;
   var debug_on: any;
   var deltaTime: any;
@@ -234,15 +224,6 @@ declare global {
   var step_accumulator: number;
   var look_sensitivity: any;
   var loot: any;
-  var losPathGraphics: any;
-  var losPathGraphicsContainer: any;
-  var losShade: any;
-  var losShadeContainer: any;
-  var losSprite: any;
-  var losTexture: any;
-  var make_starburst: any;
-  var make_starburst_with_modified_view: any;
-  var make_starburst_without_limit: any;
   var mapName: any;
   var map_json: any;
   var message: any;
@@ -287,9 +268,6 @@ declare global {
   var spyglassPos: any;
   var stage: any;
   var stage_child: any;
-  var starburst: any;
-  var starburst_angles: any;
-  var starburst_ray: any;
   var startGame: any;
   var startMenu: any;
   var state: any;
