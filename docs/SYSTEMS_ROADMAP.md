@@ -19,7 +19,9 @@ Guiding constraints:
 > **Note (post-Phase 1):** this section describes the code as found. Phase 0 deleted the
 > dead weight and Phase 1 moved `js/*.js` to `src/legacy/*.ts` under Vite — file paths
 > below are the originals. The pathologies themselves are all still there; that is what
-> Phases 2+ are for.
+> Phases 2+ are for. **Post-Phase 2:** pathology #4 (framerate-dependent simulation and
+> raw wall-clock AI timers) is fixed — fixed 60 Hz timestep plus the pausable
+> `GameClock`.
 
 The game is plain ES5 loaded as 27 ordered `<script>` tags in `game.html`, sharing ~100
 globals. Pixi.js v3 is vendored in `bin/`. There is no npm, no bundler, no modules — the
@@ -535,7 +537,7 @@ Two things landed on top of the conversion, both at the maintainer's request:
   can't skew aim either. Verified with a pinned-camera probe: screen-to-world is now
   identical at devicePixelRatio 1, 2 and 3.
 
-### Phase 2 — Core loop: fixed timestep, clock, events (~1 week)
+### Phase 2 — Core loop: fixed timestep, clock, events (~1 week) ✅ done
 
 Accumulator-based fixed 60 Hz update (fixes framerate-dependent speed — a prerequisite for
 physics tuning). A pausable `GameClock` (`after(ms)`, `every(ms)`) replaces every raw
@@ -544,6 +546,70 @@ makes pause real. Event bus lands. Extract 2–3 easy systems (input, camera, pa
 prove the strangler loop.
 **Verify:** cap FPS at 30 — movement speed unchanged; pause mid-"investigate" — the timer
 resumes correctly. Unit tests: clock.
+
+#### What shipped
+
+- **Fixed 60 Hz timestep.** `animate()` accumulates wall time and runs `gameloop()` in
+  fixed `1000/60` ms steps; per-frame movement constants are now per-*tick* constants, so
+  game speed is independent of the display's refresh rate. Frame deltas are clamped to
+  250 ms (a backgrounded tab or a too-slow machine slows down instead of freezing in a
+  catch-up spiral), and `startGame` resets the accumulator so a stay in the menu isn't
+  simulated as one burst.
+- **`GameClock`** (`src/core/clock.ts`, strict TS): `now() / after(ms) / every(ms) /
+  cancel / clear`, ticked once per fixed step from `gameloop()` — so pausing the game
+  freezes every pending gameplay timer for free, and timers can no longer fire into a
+  torn-down run. Every raw gameplay `setTimeout` migrated: guard shoot-reaction, guard
+  see-something-alarming reaction and its alert-the-others chain (guards *and* cameras),
+  `setLastSeen`'s 2 s confirmation, the choke-out kill, backup spawn waves, and the alert
+  icon's hide delay. The patrol-repath backoff from Phase 0 now counts game time
+  (`gameClock.now()`), not wall time, so pause doesn't burn it down. `clearStage()`'s
+  clear-*every*-timeout-id-on-the-page hack is one `gameClock.clear()` now.
+- **Event bus** (`src/core/events.ts`): `on/off/emit`, with one real subscriber to prove
+  the seam — camera kickback is now `events.emit('camera:kickback')` from the two shoot
+  paths, and the camera system listens. Sounds, wall destruction and squad signals plug
+  into the same bus in Phases 5–6.
+- **Three systems extracted** from `main.ts` (roadmap §2.2, mechanical move — they still
+  read shared world state as window globals, but legacy files now *import* the extracted
+  functions, and ~20 names left `legacy-globals.d.ts` and the window republish lists):
+  - `src/systems/input.ts` — key/mouse/wheel handlers, `removeHandlers`, the walk
+    animation check. `hero_moving` became a module local.
+  - `src/systems/camera.ts` — zoom, loose follow + clamping, shake, kickback.
+    `kickback_speed/amount` became module locals; dead `scaleStageChild` deleted.
+  - `src/systems/particles.ts` — shells/shards/blood ticking (`updateParticles`), the
+    splatter/eject spawners. `shard/shell/shard_limit/shell_speed/blood_speed` became
+    module locals.
+  `main.ts` is down to 2,297 lines from 2,969.
+
+#### Phase 2 verification
+
+22 new Vitest cases (clock: ordering, catch-up without drift, cancel/clear mid-update,
+the nested-timer pattern the guard AI uses; bus: subscribe/unsubscribe during emit) on
+top of the Phase 1 suites — 67 total, all green, plus typecheck and production build.
+
+Headless Playwright (software rendering, so "native" is CPU-bound ~22–25 FPS; the caps
+skip every 2nd/4th rAF callback). Hero walk speed, design value **240 px/s** (4 px/tick
+× 60 Hz):
+
+| build | ~25 FPS | ~21 FPS | ~13 FPS |
+|---|---|---|---|
+| pre-Phase 2 | 80.3 px/s | 77.6 px/s | 46.6 px/s |
+| Phase 2 | 238.7–240.4 px/s | 240.3 px/s | 235.0 px/s |
+
+The old build moves at a third of the intended speed *at its normal headless framerate* —
+speed simply tracked FPS. The new build holds the design speed everywhere.
+
+Pause semantics, verified end-to-end on both `vite dev` and the production build: a guard
+in the 500 ms alarmed-pre reaction stays un-alarmed through a 1.5 s pause and alarms
+~500 ms after resume; backup waves stop landing the moment `pause` is set (2 spawned
+before, 0 during a 2.5 s pause, all 4 after resume); the bomb fuse freezes mid-countdown
+and resumes; the blast still opens walls (9 cells) and kills a hero standing in it.
+Kickback still fires through the bus; no console errors.
+
+One vindication found while measuring: the first FPS-cap attempt replaced
+`requestAnimationFrame` with a `setTimeout`-based fake, and on the *old* build the game
+froze at the menu→game transition — `clearStage()`'s clear-all-timeouts hack was killing
+the render loop's pending timeout. Exactly the class of friendly-fire the `GameClock`
+migration removes.
 
 ### Phase 3 — Pathfinding v2 (~1–2 weeks)
 

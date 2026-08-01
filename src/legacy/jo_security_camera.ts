@@ -3,6 +3,7 @@ Copyright 2014,2015, Jordan O'Leary, All rights reserved.
 If you would like to copy or use my code, you may contact
 me at jdoleary@gmail.com
 /*******************************************************/
+import { gameClock } from '../core/clock';
 function security_camera_wrapper(pixiSprite,x,y,maxswivel,minswivel){
     function jo_security_camera(x,y,maxswivel,minswivel){
         
@@ -93,13 +94,13 @@ function security_camera_wrapper(pixiSprite,x,y,maxswivel,minswivel){
                     this.sprite.texture = (img_security_camera_alerted);
                     this.target = {x:objectOfAlarm.x,y:objectOfAlarm.y};
                     
-                    //in 3 seconds, if this guard is still alive, alert the others.
-                    setTimeout(function(){
+                    //in 2 seconds, if this camera is still alive, alert the others.
+                    gameClock.after(2000, function(){
                         if(this.alive){
                             newMessage('All the other guards are on alert!');
                             alert_all_guards();
                         };
-                    }.bind(this), 2000);
+                    }.bind(this));
                 }
             
         };
