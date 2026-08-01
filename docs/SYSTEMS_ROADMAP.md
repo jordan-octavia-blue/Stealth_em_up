@@ -477,7 +477,7 @@ first tests against the pure-math files (`jo_math`, `jo_utility`). Optional CI
 - **jQuery is gone** from the game: the map XHR is `fetch` (with the error handler kept as
   the second argument to `.then`, so a failed request still alerts but a bad map or a
   broken `windowSetup` surfaces instead of being reported as "file not found"), and the
-  three DOM calls are plain DOM. `menu.html` keeps its own jQuery for the upgrade shop; it
+  three DOM calls are plain DOM. `menu.html` keeps its own jQuery for the hub screens; it
   no longer `<script>`-preloads the whole game, and the one module it does need
   (`jo_local_storage`) arrives via `src/menu.ts`.
 - **First Vitest suites:** 45 tests over `jo_math` and `jo_utility` — movement stepping,
@@ -510,6 +510,30 @@ locally-served jQuery — which is itself a small argument for the `fetch` swap,
 unmodified `master` page cannot start at all without reaching `ajax.googleapis.com`. A
 human playthrough for *feel* is still worth doing; the automated pass only proves nothing
 throws and the state changes match.
+
+#### Follow-ups after the Phase 1 review
+
+Two things landed on top of the conversion, both at the maintainer's request:
+
+- **The upgrades metagame is gone.** `get_upgrades_from_storage.ts` is deleted and the
+  hero's stats are plain literals — the shop's starting values, so the loadout is
+  unchanged. `menu.html` loses the shop panel, its "Upgrade" nav entry, the money readout
+  and the CSS/JS behind them; its Mission Select, Controls and achievements screens stay,
+  as does the wins/loses/kill-counter localStorage they read. `game.html` now defaults to
+  `volume=1.0&level=bank_1` when the query string is absent, so opening it bare behaves
+  exactly like the canonical URL, and `index.html`'s Play button links straight there. The
+  win screen's "Back to Hub" button becomes "Play Again".
+- **HiDPI canvas bug fixed** (pre-existing, not from the conversion — `origin/master`
+  reproduces it identically). `PIXI.autoDetectRenderer(w, h, {resolution})` sizes the
+  canvas *backing store* to `w x resolution` but never sets a CSS size, so on any display
+  with `devicePixelRatio > 1` the element laid out at 2-3x the window. The page scrolled,
+  most of the canvas sat off-screen, and `camera.getMouse` — which assumes canvas pixels
+  are window pixels — mapped the mouse to the wrong world point: the hero could only aim
+  into one region and the camera chased a bogus position. `windowSetup` now sets the CSS
+  size the way `window.onresize` always did (which is why resizing the window used to fix
+  it), and `mouseMove` reads `clientX/clientY` instead of `pageX/pageY` so a scrolled page
+  can't skew aim either. Verified with a pinned-camera probe: screen-to-world is now
+  identical at devicePixelRatio 1, 2 and 3.
 
 ### Phase 2 — Core loop: fixed timestep, clock, events (~1 week)
 

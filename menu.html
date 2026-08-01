@@ -134,75 +134,6 @@
             margin-bottom: 0px; 
         }
         #datatablesdiv tr { cursor: pointer; cursor: hand; }
-        #upgradeScreen{
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            height: 900px;
-            width: 720px;
-            margin-top: -450px;
-            margin-left: -360px;
-        
-        }
-        #upgradeInfo{
-            width: 200px;
-            height: 100%;
-        
-        }
-        #upgrades{
-            position:absolute;
-            top:0;
-            left:220px;
-        
-            width: 500px;
-            height: 100%;
-            overflow:auto;
-            border-radius:10px;
-            border: 2px solid;
-        
-        }
-        .upgrade_button{
-            height:60px;
-        
-        }
-        .upgrade_button:hover{
-            background: #3cb0fd;
-            text-decoration: none;
-        }
-        .upgradeImage{
-            padding: 10px;
-            width: 40px;
-            height: 40px;
-        }
-        .upgradeText{
-            position:absolute;
-            padding: 10px;
-            padding-left:0;
-            width: 400px;
-            height: 40px;
-            line-height:40px;
-        }
-        .upgradeCost{
-            position:absolute;
-            padding: 10px;
-            height: 40px;
-            line-height:40px;
-            right: 0;
-        
-        }
-        #tooltip{
-            padding: 5px;
-            min-height: 80px;
-            background-color:white;
-            border-radius:10px;
-            border: 2px solid;
-        }
-        #hero_stats{
-            padding:5px;
-            background-color:white;
-            border-radius:10px;
-            border: 2px solid;
-        }
         
         #mc_embed_signup{background:#fff; font:14px Helvetica,Arial,sans-serif;  width:390px;}
         
@@ -216,7 +147,7 @@
     
     <script src="/bin/pixi.js"></script>
 
-    <!-- The upgrade shop reads/writes the jo_store_* helpers; loading them as a module
+    <!-- The achievements panel reads the jo_store_* helpers; loading them as a module
          keeps this page on the same source as the game (see src/menu.ts). -->
     <script type="module" src="/src/menu.ts"></script>
 </head>
@@ -243,20 +174,12 @@
         <div class="headerButton button2">
             <span>Missions Remaining:</span>
         </div>
-        <div class="headerButton button2 button2clickable" onclick="showMenuScreen('upgradeScreen');">
-            <span>Upgrade</span>
-            
-        </div>
         <div class="headerButton button2 button2clickable" onclick="showMenuScreen('levelSelect');">
             <span>Mission Select</span>
             
         </div>
         <div class="headerButton button2 button2clickable" onclick="showMenuScreen('startScreen');">
             <span>Controls</span>
-            
-        </div>
-        <div style="position:fixed; right:0;" class="headerButton button2">
-            <span id="HeaderMoney">Money</span>
             
         </div>
     </div>
@@ -276,25 +199,6 @@
 
     </script>
             
-    <div id="upgradeScreen" class="body_content">
-        <div id="upgradeInfo">
-            <div id="tooltip">Upgrade Tooltip:  <br>Hover over an upgrade for more info.</div>
-            <br>
-            <div id="hero_stats">
-                
-            </div>
-        </div>
-        <div id="upgrades">
-            <!--
-            <div class="button2 upgrade_button">
-                <img class="upgradeImage" src="images/tile_red.png"></img>
-                <span class="upgradeText">More Health</span>
-                <span class="upgradeCost">100</span>
-            </div>-->
-            
-        </div>
-        <!--Show effect of upgrades-->
-    </div>
     <div id="startScreen" class="body_content" align="right">
         <!--<div><button type="button" class="btn btn-1 btn-1a" onclick="location.href='/game.html?volume=0.0'">Start Game (Muted)</button></div>-->
 
@@ -539,180 +443,6 @@
         <iframe src="https://docs.google.com/forms/d/1g9iHmcgLgr4Ob_XtQXY8P5cIKpV4QaSOcXAFXrAADvs/viewform?embedded=true" width="760" height="1000" frameborder="0" marginheight="0" marginwidth="0">Loading...</iframe>
     </div>
     <script>
-        function update_stats(){
-            var hero_stats = "";
-            hero_stats += "Health: " + jo_store_get('hero_health') + "<br>";
-            hero_stats += "Kick Doors: " + jo_store_get('kick_doors') + "<br>";
-            hero_stats += "Automatically Pick Up Guns: " + jo_store_get('auto_pickup_ammo') + "<br>";
-            hero_stats += "Number of Guns you can hold: " + jo_store_get('NumOfGunsHold') + "<br>";
-            hero_stats += "Remote Lockpick: " + jo_store_get('RemoteLockpick') + "<br>";
-            hero_stats += "Run Speed: " + jo_store_get('Run_speed') + "<br>";
-            hero_stats += "Lockpick Speed: " + jo_store_get('Lockpick_speed') + "<br>";
-            hero_stats += "Reload Speed: " + jo_store_get('Reload_speed') + "<br>";
-            hero_stats += "Toggle Mask Speed: " + jo_store_get('Toggle_mask') + "<br>";
-            hero_stats += "Choke Out Speed: " + jo_store_get('Choke_speed') + "<br>";
-            hero_stats += "Drag Body Speed: " + jo_store_get('Drag_body_speed') + "<br>";
-            hero_stats += "Timed Bomb: " + jo_store_get('Timed_bomb') + "<br>";
-            hero_stats += "Remote Bomb: " + jo_store_get('Remote_bomb') + "<br>";
-            hero_stats += "Body_armor: " + jo_store_get('Body_armor') + "<br>";
-            hero_stats += "Plastic Surgery: " + jo_store_get('Plastic_surgery') + "<br>";
-            $('#hero_stats').html(hero_stats);
-            
-            refreshAvaliableUpgrades();
-            
-            //update money:
-            $('#HeaderMoney').text("Money: $"+jo_store_get('money'));
-        }
-        function upgrade(key){
-            console.log('upgrade: ' + key);
-        
-            switch(key){
-                case "More Health":
-                    jo_store_inc("hero_health");
-                    break;
-                case "Kick Doors Open":
-                    jo_store("kick_doors",true);
-                    break;
-                case "Automatically Pick Up Ammo":
-                    jo_store("auto_pickup_ammo",true);
-                    break;
-                case "Hold More Guns":
-                    jo_store_inc("NumOfGunsHold");
-                    break;
-                case "Remote Lockpick":
-                    jo_store("RemoteLockpick",true);
-                    break;
-                case "Increase Run Speed":
-                    jo_store_inc("Run_speed");
-                    break;
-                case "Increase Lockpick Speed":
-                    jo_store("Lockpick_speed",jo_store_get("Lockpick_speed")*0.9);
-                    break;
-                case "Increase Reload Speed":
-                    jo_store("Reload_speed",jo_store_get("Reload_speed")*0.9);
-                    break;
-                case "Increase Toggling Mask Speed":
-                    jo_store("Toggle_mask",jo_store_get("Toggle_mask")*0.9);
-                    break;
-                case "Increase Choke Out Speed":
-                    jo_store("Choke_speed",jo_store_get("Choke_speed")*0.9);
-                    break;
-                case "Increase Drag Body Speed":
-                    jo_store_inc("Drag_body_speed");
-                    break;
-                case "Timed Bomb":
-                    jo_store("Timed_bomb",true);
-                    break;
-                case "Remote Bomb":
-                    jo_store("Remote_bomb",true);
-                    break;
-                case "Body_armor":
-                    jo_store("Body_armor",true);
-                    break;
-                case "Plastic Surgery":
-                    jo_store_inc("Plastic_surgery");
-                    break;    
-                default:
-                    console.log('Error: No key match found in upgrade()');
-                    break;
-            }
-            //cost
-            var money = jo_store_get("money");
-            money -= upgrades[key].cost;
-            jo_store("money",money);
-            
-            //remove from upgrades list:
-            delete upgrades[key];
-            //refresh upgrades and stats
-            update_stats();
-            console.log('---');
-            
-        }
-        function refreshAvaliableUpgrades(){
-            //clear previous
-            $('#upgrades').html('');
-            //add upgrade buttons to upgrade menu:
-            for(var key in upgrades){
-               $('#upgrades').append('<div class="button2 upgrade_button" data-key="'+key+'" onclick="upgrade(\''+key+'\');"><img class="upgradeImage" src="images/icons/'+upgrades[key].image+'.png"></img><span class="upgradeText">' + key + '</span><span class="upgradeCost">' + upgrades[key].cost + '</span></div>');
-            }
-            
-            $('.upgrade_button').hover(function(){
-                $('#tooltip').text(upgrades[$(this).data('key')].description);
-            });
-        }
-        function newGameReset(){
-            jo_store('game_count',1);
-            //update stats:
-            jo_store("money",2);
-            jo_store("hero_health",1);
-            jo_store("kick_doors",false);
-            jo_store("auto_pickup_ammo",false);
-            jo_store("NumOfGunsHold",1);
-            jo_store("RemoteLockpick",false);
-            jo_store("Run_speed",8);
-            jo_store("Lockpick_speed",5000);
-            jo_store("Reload_speed",2000);
-            jo_store("Toggle_mask",500);
-            jo_store("Choke_speed",3000);
-            jo_store("Drag_body_speed",4);
-            jo_store("Timed_bomb",false);
-            jo_store("Remote_bomb",false);
-            jo_store("Body_armor",false);
-            jo_store("Plastic_surgery",0);
-        }
-        var upgrades = {
-            "More Health":{"cost": 2, "description":"You can survive being shot more.", "image": "S_Holy03"},
-            "Kick Doors Open":{"cost": 5, "description":"Sprinting twords a door kicks it open.", "image": "E_Wood04"},
-            "Automatically Pick Up Ammo":{"cost": 3, "description":"Walking over guns automatically and instantly picks up their ammo.", "image": "I_Chest02"},
-            "<strike>Hold More Guns</strike>":{"cost": 5, "description":"Hold more guns.", "image": "W_Gun001"},
-            "Remote Lockpick":{"cost": 4, "description":"While lockpicking, you can walk away, and the door will continue to unlock.", "image": "I_Key01"},
-            "Increase Run Speed":{"cost": 2, "description":"Run Faster!", "image": "S_Buff04"},
-            "Increase Lockpick Speed":{"cost": 2, "description":"Pick Faster!", "image": "I_Key02"},
-            "Increase Reload Speed":{"cost": 2, "description":"Reload Faster!", "image": "W_Gun002"},
-            "Increase Toggling Mask Speed":{"cost": 1, "description":"Remove/Put on your mask faster!", "image": "S_Death01"},
-            "Increase Choke Out Speed":{"cost": 2, "description":"Coke out enemies faster!", "image": "S_Death02"},
-            "Increase Drag Body Speed":{"cost": 2, "description":"Drag bodies all around! (with great speed)", "image": "W_Fist001"},
-            "Timed Bomb":{"cost": 5, "description":"Plant a bomb on a timer.", "image": "S_Fire02"},
-            "Remote Bomb":{"cost": 7, "description":"Plant a remotely detonated bomb.", "image": "S_Fire06"},
-            "Body_armor":{"cost": 2, "description":"50% chance to survive a fatal wound.", "image": "A_Armour01"},
-            "<strike>Plastic Surgery</strike>":{"cost": 10, "description":"Everyone forgets what you look like.", "image": "I_Mirror"}
-        };
-        //jo_store_* now arrives from a module (src/menu.ts), which the browser defers
-        //until after the document is parsed - so the save-file bootstrap waits for it.
-        //Function declarations stay at this scope: the inline onclick= handlers need them.
-        document.addEventListener('DOMContentLoaded', function(){
-        //if no games have been played, reset the stats:
-        if(jo_store_get('game_count')===undefined)newGameReset();
-        else jo_store_inc('game_count');
-
-        //remove upgrade buttons that have already been researched:
-        if(jo_store_get('hero_health')>1)delete upgrades["More Health"];
-            console.log('----------------');
-            console.log(jo_store_get('kick_doors'));
-        if(jo_store_get('kick_doors')=='true'){
-            console.log('delete');
-            delete upgrades["Kick Doors Open"];
-        }else{
-            console.log('no delete');
-        }
-        if(jo_store_get('auto_pickup_ammo')=='true')delete upgrades["Automatically Pick Up Ammo"];
-        if(jo_store_get('NumOfGunsHold')>1)delete upgrades["Hold More Guns"];
-        if(jo_store_get('RemoteLockpick')=='true')delete upgrades["Remote Lockpick"];
-        if(jo_store_get('Run_speed')>8)delete upgrades["Increase Run Speed"];
-        if(jo_store_get('Lockpick_speed')<5000)delete upgrades["Increase Lockpick Speed"];
-        if(jo_store_get('Reload_speed')<2000)delete upgrades["Increase Reload Speed"];
-        if(jo_store_get('Toggle_mask')<500)delete upgrades["Increase Toggling Mask Speed"];
-        if(jo_store_get('Choke_speed')<3000)delete upgrades["Increase Choke Out Speed"];
-        if(jo_store_get('Drag_body_speed')>4)delete upgrades["Increase Drag Body Speed"];
-        if(jo_store_get('Timed_bomb')=='true')delete upgrades["Timed Bomb"];
-        if(jo_store_get('Remote_bomb')=='true')delete upgrades["Remote Bomb"];
-        if(jo_store_get('Body_armor')=='true')delete upgrades["Remote Bomb"];
-        if(jo_store_get('Plastic_surgery')>0)delete upgrades["Plastic Surgery"];
-        
-        
-        update_stats();
-        refreshAvaliableUpgrades();
-        });
 
         var test;
         //pull level maps from server
@@ -781,7 +511,6 @@
             $("#achievements").hide();
             $("#mailingList").hide();
             $("#feedback").hide();
-            $("#upgradeScreen").hide();
             
             $("#"+id).show();
             history.pushState({}, id, "#id");

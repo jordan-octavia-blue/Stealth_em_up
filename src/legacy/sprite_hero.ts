@@ -29,20 +29,24 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
         ];*/
         this.gun_index = 0;
         this.gun = gun_pistol_silenced.make_copy(),//this.guns[this.gun_index];
-        this.health = upgrades["hero_health"];
-        this.ability_kick_doors = upgrades["kick_doors"];
-        this.ability_auto_pickup_ammo = upgrades["auto_pickup_ammo"];
-        this.ability_num_guns_hold = upgrades["NumOfGunsHold"];//how many guns the player can hold
-        this.ability_remote_lockpick = upgrades["RemoteLockpick"];
-        if(upgrades["Run_speed"])this.speed_sprint = upgrades["Run_speed"];
-        if(upgrades["Drag_body_speed"])this.speed_walk = upgrades["Drag_body_speed"];
-        this.lockpick_speed = upgrades["Lockpick_speed"];
-        this.reload_speed = upgrades["Reload_speed"];
-        this.ability_toggle_mask_speed = upgrades["Toggle_mask"];
-        this.ability_choke_speed = upgrades["Choke_speed"];
-        this.ability_timed_bomb = upgrades["Timed_bomb"];
-        this.ability_remote_bomb = upgrades["Remote_bomb"];
-        this.ability_body_armor = upgrades["Body_armor"];
+        //These were read from the `upgrades` object, which the metagame shop wrote into
+        //localStorage. That system is gone; every run now starts from the same loadout,
+        //so the shop's starting values are simply the values.
+        this.health = 1;
+        this.ability_kick_doors = 0;
+        this.ability_auto_pickup_ammo = false;
+        this.ability_num_guns_hold = 1;//how many guns the player can hold
+        this.ability_remote_lockpick = false;
+        //speed_walk / speed_sprint keep the constructor's values: the shop's defaults for
+        //Drag_body_speed and Run_speed were 4 and 8, which is exactly what the call site
+        //already passes, so those two overrides never did anything.
+        this.lockpick_speed = 5000;
+        this.reload_speed = 2000;
+        this.ability_toggle_mask_speed = 500;
+        this.ability_choke_speed = 4000;
+        this.ability_timed_bomb = false;
+        this.ability_remote_bomb = false;
+        this.ability_body_armor = false;
         
         //debug info
         this.draw_los_circles = false;

@@ -27,9 +27,6 @@ declare global {
   var storageEnabled: any;
   var supports_html5_storage: any;
 
-  // get_upgrades_from_storage.ts
-  var upgrades: any;
-
   // images_from_sheet.ts
   var onAssetsLoaded: any;
 
@@ -158,6 +155,8 @@ declare global {
   var circularProgressBar: any;
 
   // main.ts
+  var DEFAULT_LEVEL: any;
+  var DEFAULT_VOLUME: any;
   var BLOOD_TRAIL_BAKE_EVERY: any;
   var addKeyHandlers: any;
   var alarmingObjects: any;

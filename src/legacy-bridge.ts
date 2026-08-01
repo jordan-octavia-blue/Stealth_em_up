@@ -26,7 +26,6 @@
 // legacy code reads `PIXI.*` directly everywhere. Isolating it behind src/render/ is
 // Phase 2+ work (roadmap §2.3).
 import './legacy/jo_local_storage';
-import './legacy/get_upgrades_from_storage';
 import './legacy/images_from_sheet';
 import './legacy/jo_gun';
 import './legacy/jo_gun_drop';

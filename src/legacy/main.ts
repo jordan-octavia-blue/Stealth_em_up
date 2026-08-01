@@ -45,9 +45,12 @@ function getColor(x,y){
     return {r:50,g:50,b:50,a:1};
 }
 function mouseMove(e){
-    mouse_relative.x = e.pageX;
-    mouse_relative.y = e.pageY;
-    
+    //Viewport coords, not document coords: camera.getMouse wants the position within the
+    //canvas, and the canvas sits at the top-left of an unscrolled page. pageX/pageY add
+    //the scroll offset, which silently skewed aim whenever the page could scroll at all.
+    mouse_relative.x = e.clientX;
+    mouse_relative.y = e.clientY;
+
 }
 function windowSetup(){
     //Mr Doob's Stats.js:
@@ -70,6 +73,15 @@ function windowSetup(){
         resolution:window.devicePixelRatio
     };
     renderer = PIXI.autoDetectRenderer(window_properties.width, window_properties.height,renderOptions);
+    //`resolution` only sizes the canvas *backing store* (width/height attributes), so on a
+    //HiDPI display the element also lays out at resolution x the window unless a CSS size
+    //says otherwise. That made the page scroll, put most of the canvas off-screen, and
+    //broke the mouse -> world mapping in camera.getMouse (which assumes canvas pixels are
+    //window pixels): the hero could only aim into one quadrant and the camera chased a
+    //bogus mouse position. window.onresize below already did this; setup did not, so the
+    //bug fixed itself the moment you resized the window.
+    renderer.view.style.width = window_properties.width + "px";
+    renderer.view.style.height = window_properties.height + "px";
     // add the renderer view element to the DOM
 
     document.getElementById("canvas_holder").appendChild(renderer.view);
@@ -294,20 +306,21 @@ Entry Point
 */
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
+//The game is the whole app now: there is no hub to be launched from, so the query string
+//only overrides defaults rather than supplying them. Opening game.html bare behaves
+//exactly like game.html?volume=1.0&level=bank_1.
+window.DEFAULT_VOLUME = 1.0;
+window.DEFAULT_LEVEL = "bank_1";
+
 window.url_queryString = getUrlVars();
-if(url_queryString["volume"]){
-    var newVol = url_queryString["volume"];
+var newVol = url_queryString["volume"] !== undefined ? Number(url_queryString["volume"]) : DEFAULT_VOLUME;
+if(!isNaN(newVol)){
     volume_master = newVol;
     readjustVolumes();
 }
 
-window.mapName ??= undefined;
-if(url_queryString["level"]){
-    mapName = url_queryString["level"];
-    getMapInfo("maps", mapName + ".jomap");
-}else{
-    getMapInfo("maps", "bank_1.jomap");
-}
+window.mapName = url_queryString["level"] || DEFAULT_LEVEL;
+getMapInfo("maps", mapName + ".jomap");
 
         
 function removeAllChildren(obj){
@@ -1396,16 +1409,14 @@ function gameloop_getawaycar_and_loot(deltaTime){
             //deposite money in car:
             newMessage("The money is safe!");
             //add button for win condition
-            addButton("Back to Hub",window.innerWidth/2,window.innerHeight/2,function(){location.href='/stealth/menu.html';});
-            
-            
+            //Used to send you back to the upgrade hub to spend the payout. There is no hub
+            //and no payout any more, so the only thing left to offer is another run.
+            addButton("Play Again",window.innerWidth/2,window.innerHeight/2,function(){location.reload();});
+
             //add to stats:
             jo_store_inc("wins");
-            
-            //add 5 gold:
-            jo_store("money",jo_store_get('money')+5);
-            
-            
+
+
             hero.carry = null;
             
         }
