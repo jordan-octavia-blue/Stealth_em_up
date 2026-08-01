@@ -60,38 +60,16 @@
         
 	</style>
 
-	<script src="bin/pixi.js"></script>
-	
+	<!-- Pixi v3 is vendored and still consumed as a UMD global (roadmap §2.3); it has to
+	     be in place before the module entry runs, which a classic script guarantees.
+	     The src is root-absolute on purpose: that keeps Vite from pulling the UMD bundle
+	     into the module graph, so it stays a plain file served from bin/. -->
+	<script src="/bin/pixi.js"></script>
+	<script type="module" src="/src/game.ts"></script>
 </head>
     <body>
     <div id="debug_info"></div>
     <div id="canvas_holder"></div>
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
-    <script src="js/jo_local_storage.js"></script>
-    <script src="js/get_upgrades_from_storage.js"></script>
-    <script src="js/images_from_sheet.js"></script>
-    <script src="js/jo_gun.js"></script>
-    <script src="js/jo_gun_drop.js"></script>
-    <script src="js/menu_button_manager.js"></script>
-    <script src="js/jo_debug.js"></script>
-    <script src="js/jo_door.js"></script>
-    <script src="js/jo_math.js"></script>
-	<script src="js/jo_sprite.js"></script>
-	<script src="js/jo_cam.js"></script>
-	<script src="js/jo_utility.js"></script>
-    <script src="js/jo_doodad.js"></script>
-	<script src="js/jo_wall.js"></script>
-	<script src="js/jo_grid.js"></script>
-	<script src="js/astar.js"></script>
-	<script src="js/Stats.js"></script>
-	<script src="js/jo_raycast.js"></script>
-	<script src="js/jo_security_camera.js"></script>
-	<script src="js/sprite_hero.js"></script>
-	<script src="js/sprite_guard.js"></script>
-    <script src="js/jo_movie_clip.js"></script>
-    <script src="js/sound_manager.js"></script>
-    <script src="js/jo_progress_bar.js"></script>
-    <script src="js/main.js"></script>
     <div id="instructions-container">
       <div>I created this game many years ago while I was first learning how to program.  It's not polished, and coded rather poorly, but it was a lot of fun to make and I learned a lot.  Enjoy!</div>
       <br>

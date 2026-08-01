@@ -1,0 +1,29 @@
+{
+  // Deliberately loose (roadmap §2.1): Phase 1 is a mechanical .js -> .ts + ESM rename,
+  // not a typing pass. Strictness is ratcheted directory-by-directory as subsystems are
+  // extracted; new code under src/nav, src/ai, src/physics, ... is written strict from
+  // day one and can opt in with its own tsconfig or per-file checks.
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "types": ["vite/client", "node"],
+
+    "strict": false,
+    "noImplicitAny": false,
+    "noImplicitThis": false,
+    "strictNullChecks": false,
+    "useDefineForClassFields": true,
+
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src", "test", "vite.config.ts"]
+}
