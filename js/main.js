@@ -165,11 +165,34 @@ var bomb;
 var bombs_left;
 var bomb_fuse_start;
 var bomb_fuse;
+var bomb_ticking;//true while the fuse is counting down in the game loop
+var bomb_scale_variety;//phase of the bomb tooltip's pulsing scale
 var bomb_tooltip;
 var bomb_radius_debug;
 var bomb_radius;
 
 var blood_trail;
+//Blood splats are drawn into blood_trail's PIXI.Graphics with noClear, so its draw-command
+//list grew without bound for the whole run. Instead we periodically bake the accumulated
+//splats into a RenderTexture and clear the Graphics, so the live command list stays small.
+var blood_trail_texture;
+var blood_trail_sprite;
+var blood_trail_pending = 0;
+var BLOOD_TRAIL_BAKE_EVERY = 200;//splats buffered in the Graphics before baking
+//Draw one blood splat onto the persistent trail, baking down to the RenderTexture when the
+//live Graphics has buffered enough of them.
+function drawBloodTrail(x,y,size){
+    blood_trail.draw(x,y,size,true);
+    blood_trail_pending++;
+    if(blood_trail_pending >= BLOOD_TRAIL_BAKE_EVERY)bakeBloodTrail();
+}
+function bakeBloodTrail(){
+    if(!blood_trail_texture)return;
+    //clear:false so the texture keeps everything baked before this
+    blood_trail_texture.render(blood_trail.graphics,null,false);
+    blood_trail.graphics.clear();
+    blood_trail_pending = 0;
+}
 
 
 //grid/map
@@ -201,7 +224,6 @@ var bullets;
             var guard_backup_spawn;
             var numOfBackupGuards;
             var backupCalled;//true when backup has been called so it cannot be called again
-			var civs;
 			
 
 			
@@ -420,6 +442,8 @@ function startGame(){
     
     bomb_fuse_start = 5000;//this is now set inside of setBomb
     bomb_fuse = bomb_fuse_start;
+    bomb_ticking = false;
+    bomb_scale_variety = 0;
     //bomb_tooltip text:
     bomb_tooltip = new PIXI.Text("Bomb Tooltip", { font: "45px Arial", fill: "#000000", align:"left", stroke: "#FFFFFF", strokeThickness: 2 });
     bomb_tooltip.anchor.x = 0.5;//centered
@@ -528,7 +552,14 @@ function setup_map(map){
     //whole map width and height:
     grid_width = grid.width*grid.cell_size;
     grid_height = grid.height*grid.cell_size;
-    
+
+    //Baked blood trail: sits underneath blood_trail's live Graphics so freshly drawn splats
+    //still render on top of the already-baked ones.
+    blood_trail_texture = new PIXI.RenderTexture(renderer,grid_width,grid_height);
+    blood_trail_sprite = new PIXI.Sprite(blood_trail_texture);
+    display_blood.addChildAt(blood_trail_sprite,0);
+    blood_trail_pending = 0;
+
     /*
     New LOS Graphics:
     */
@@ -600,11 +631,6 @@ function setup_map(map){
             numOfBackupGuards = 7;
             backupCalled = false;
             
-			civs = [];
-            /*
-			for(var i = 0; i < 8; i++){
-			    civs.push(new sprite_civ_wrapper(new PIXI.Sprite(img_civilian)));
-			}*/
 			computer_for_security_cameras = new jo_sprite(new PIXI.Sprite(img_computer));
 			computer_for_security_cameras.x = map.objects.computer[0];
 			computer_for_security_cameras.y = map.objects.computer[1];
@@ -812,7 +838,7 @@ function gameloop_guards(deltaTime){
                     //if guard is alarmed rotate to the next waypoint so they peer around corners.
                     //~guard doesn't see hero so set target_rotate to null so guard can rotate where he moves again
                     //don't change rotation unless the guard is close to the point (this keeps them from walking backwards [bug])
-                    if(guard.path[0] && get_distance(guard.x,guard.y,guard.path[0].x,guard.path[0].y < 100))guard.target_rotate = guard.path[0];
+                    if(guard.path[0] && get_distance(guard.x,guard.y,guard.path[0].x,guard.path[0].y) < 100)guard.target_rotate = guard.path[0];
                 
                     //if alarmed move to last place hero was seen
                     if(notifyGuardsOfHeroLocation || !guard.chasingHero && hero.lastSeenX && hero.lastSeenY){
@@ -877,59 +903,6 @@ function gameloop_guards(deltaTime){
         }
     }
 }
-function gameloop_civs(deltaTime){
-    //////////////////////
-    //update Civs
-    //////////////////////
-    for(var i = 0; i < civs.length; i++){
-        if(civs[i].alive){
-            //if guard are not already alarmed
-            if(!civs[i].alarmed  && !civs[i].being_choked_out){
-                //check if civs sees alarming objects:
-                for(var j = 0; j < alarmingObjects.length; j++){
-                    if(civs[i].doesSpriteSeeSprite(alarmingObjects[j])){
-                        newMessage('A civs has seen something alarming!');
-                        civs[i].seeAlarmingObject(alarmingObjects[j]);
-                    }
-                }
-                //check if civs sees hero:
-                if(civs[i].doesSpriteSeeSprite(hero)){
-                    if(hero.wilLCauseAlert()){
-                        newMessage('A civs has seen you suspicious!');
-                        //alarm if hero is seen masked
-                        civs[i].seeAlarmingObject(hero);
-                    }
-                    //civs are not alarmed by seeing hero in a restricted area
-                    
-                }
-            }
-            //if civs has a path
-            if(civs[i].path.length > 0){
-                //if civs does not have a target:
-                if(civs[i].target.x == null || civs[i].target.y == null){
-                    civs[i].target = civs[i].path.shift();//get the first element.
-                }
-                
-            }else{
-                //if civs does not have a path:
-                if(!civs[i].waiting){
-                    civs[i].waiting = true;
-                    var how_long_to_wait = Math.floor(Math.random() * 7000) + 1000;
-                    setTimeout(function(){
-                        this.waiting = false;
-                        this.getRandomPatrolPath();//get new path after waiting
-                    }.bind(civs[i]),how_long_to_wait);
-                }
-            }
-            //call move to target, if target is reached, it will return true and set target to null
-            if(civs[i].move_to_target()){
-                civs[i].target.x = null;
-                civs[i].target.y = null;
-            }
-        }
-        civs[i].prepare_for_draw();
-    }
-}
 function gameloop_security_cams(deltaTime){
     //////////////////////
     //Security Cameras
@@ -938,7 +911,7 @@ function gameloop_security_cams(deltaTime){
         var cam = security_cameras[i];
         
         if(!cameras_disabled && cam.alive){
-            cam.swivel();
+            cam.swivel(deltaTime);
             
             
             //if security_cameras are not already alarmed
@@ -1061,10 +1034,7 @@ function gameloop_bullets(deltaTime){
                     if(guard.hasRiotShield && guard.alarmed){
                         // check to see if riot shield blocks bullet:
                         // Riot shield is only active when the guard is alarmed
-                        console.log('splatter angle: ' + Math.PI+splatter_angle);
-                        console.log('angle: ' + guard.rad);
                         var angleInArc = angleInArcRad(guard.rad,Math.PI/2,Math.PI+splatter_angle)
-                        console.log('angle in arc: ' + angleInArc);
                         if(angleInArc){
                             guardDies = false;
                             shardParticleSplatter(splatter_angle,guard);
@@ -1119,15 +1089,6 @@ function gameloop_bullets(deltaTime){
 
             }
         }
-        /*//check if hero aim intersects civs:
-        for(var i = 0; i < civs.length; i++){
-            if(civs[i].alive && circle_linesetment_intersect(civs[i].getCircleInfoForUtilityLib(),hero.aim.start,hero.aim.end)){
-                civs[i].kill();
-                if(civs[i].alarmed)newMessage("You dispatch the civilian before he can get the word out!");
-
-            }
-        
-        }*/
         //check if bullet intersects camera:
         for(var i = 0; i < security_cameras.length; i++){
             if(circle_linesetment_intersect(security_cameras[i].getCircleInfoForUtilityLib(),bulletPosBeforeMove,{x:bullet.x,y:bullet.y})){
@@ -1232,7 +1193,7 @@ function gameloop_dragtarget(deltaTime){
             if(hero_drag_target.blood_trail_size > 3)hero_drag_target.blood_trail_size-=0.01;
             hero_drag_target.blood_trail_skip_frequency+=0.01;
             
-            if(skip_blood_draw <= 1)blood_trail.draw(hero_drag_target.x+blood_x_mod,hero_drag_target.y+blood_y_mod,blood_size_mod,true);
+            if(skip_blood_draw <= 1)drawBloodTrail(hero_drag_target.x+blood_x_mod,hero_drag_target.y+blood_y_mod,blood_size_mod);
         }
     }
 }
@@ -1902,8 +1863,7 @@ function gameloop(deltaTime){
         var blood_y_mod = randomFloatWithBias2(-10,10);
         var blood_size_mod = randomFloatWithBias2(1,blood.scale.y*20);
         //var skip_blood_draw = randomIntFromInterval(0,3);
-        //if(!skip_blood_draw)blood_trail.draw(blood.position.x+blood_x_mod,blood.position.y+blood_y_mod,blood_size_mod,true);
-        blood_trail.draw(blood.position.x+blood_x_mod,blood.position.y+blood_y_mod,blood_size_mod,true);
+        drawBloodTrail(blood.position.x+blood_x_mod,blood.position.y+blood_y_mod,blood_size_mod);
         
         //remove when done ticking
         if(tickParticle(blood,7,false)){
@@ -1961,8 +1921,6 @@ function gameloop(deltaTime){
     }
     hero_last_seen.prepare_for_draw();
     
-    gameloop_civs(deltaTime);
-    
     gameloop_guards(deltaTime);
     
     if(notifyGuardsOfHeroLocation)console.log("Repath all guards to hero last seen");
@@ -1974,6 +1932,8 @@ function gameloop(deltaTime){
     gameloop_alert_animation(deltaTime);
     
     gameloop_bullets(deltaTime);
+
+    gameloop_bomb(deltaTime);
     
     gameloop_getawaycar_and_loot(deltaTime);
 
@@ -2668,97 +2628,107 @@ function set_latestAlert(unit){
     
 }
 //blow up bomb
+//The fuse used to run on a 10ms setInterval, which ignored pause, kept ticking after the
+//hero died, and drifted from the render loop. It is now driven by gameloop_bomb(deltaTime).
 function setBomb(fuseStart){
-    
+
     bomb_fuse_start = fuseStart;
     bomb_fuse = bomb_fuse_start;
-    var bomb_scale_variety = 0;
-    var bomb_tooltip_interval = setInterval(function(){
-        bomb_tooltip.text = ((bomb_fuse/1000.0).toFixed(1));
-        bomb_fuse -= 10;
-        var percent_till_explode = 1-bomb_fuse/bomb_fuse_start;
-        if(percent_till_explode>=0.95)bomb_tooltip.style.fill = "#ff0000";
-        else bomb_tooltip.style.fill = "#" + Math.round(percent_till_explode*16).toString(16) +  Math.round(percent_till_explode*16).toString(16) + "0000";
-        bomb_tooltip.scale.x = 0.1*Math.sin(bomb_scale_variety)+1;
-        bomb_tooltip.scale.y = 0.1*Math.sin(bomb_scale_variety)+1;
-        bomb_scale_variety+=0.1;
-        if(bomb_fuse<=0){
-            play_sound(sound_explosion);
+    bomb_scale_variety = 0;
+    bomb_ticking = true;
+}
+//counts the fuse down once per frame; called from gameloop()
+function gameloop_bomb(deltaTime){
+    if(!bomb_ticking)return;
+
+    bomb_tooltip.text = ((bomb_fuse/1000.0).toFixed(1));
+    bomb_fuse -= deltaTime;
+    var percent_till_explode = 1-bomb_fuse/bomb_fuse_start;
+    if(percent_till_explode>=0.95)bomb_tooltip.style.fill = "#ff0000";
+    else bomb_tooltip.style.fill = "#" + Math.round(percent_till_explode*16).toString(16) +  Math.round(percent_till_explode*16).toString(16) + "0000";
+    bomb_tooltip.scale.x = 0.1*Math.sin(bomb_scale_variety)+1;
+    bomb_tooltip.scale.y = 0.1*Math.sin(bomb_scale_variety)+1;
+    //the old interval added 0.1 every 10ms; keep that pulse rate independent of framerate
+    bomb_scale_variety += deltaTime*0.01;
+    if(bomb_fuse<=0){
+        bomb_ticking = false;
+        explodeBomb();
+    }
+}
+function explodeBomb(){
+    play_sound(sound_explosion);
+
+    camera.startShake(300,12);
+    bomb.sprite.visible = false;
+    bomb_tooltip.visible = false;
+    
+    //set last seen:
+    
+        alert_all_guards();
+        hero.lastSeenX = bomb.x;
+        hero.lastSeenY = bomb.y;
+        hero_last_seen.x = bomb.x;
+        hero_last_seen.y = bomb.y;
+        //repath alert guards to hero
+        notifyGuardsOfHeroLocation = true;
+    
+    //destroy nearby walls:
+    for(var w = 0; w < grid.cells.length; w++){
+        if(get_distance(bomb.x,bomb.y,grid.cells[w].x,grid.cells[w].y) < bomb_radius){
+            var wallInfo = grid.getInfoFromIndex(w);
+            //do not blow through map bounds walls
+            if(wallInfo.x_index != 0 && wallInfo.x_index != grid.width-1 && wallInfo.y_index != 0 && wallInfo.y_index != grid.height-1){
+                
+                //test if any surrounding tiles are restricted:
+                var makeRestricted = false;
+                if(grid.isTileRestricted_coords(grid.cells[w].x-64,grid.cells[w].y))makeRestricted = true;
+                if(grid.isTileRestricted_coords(grid.cells[w].x+64,grid.cells[w].y))makeRestricted = true;
+                if(grid.isTileRestricted_coords(grid.cells[w].x,grid.cells[w].y-64))makeRestricted = true;
+                if(grid.isTileRestricted_coords(grid.cells[w].x,grid.cells[w].y+64))makeRestricted = true;
+                
+                if(makeRestricted)grid.cells[w].changeImage(4);
+                else{
+                    if(grid.cells[w].image_number != 1 && grid.cells[w].image_number != 3 && grid.cells[w].image_number != 4)grid.cells[w].changeImage(1);
+                }
+                
+                grid.cells[w].solid = false;
+                grid.cells[w].blocks_vision = false;
+                grid.cells[w].door = false;
+            
+            }
         
-            camera.startShake(300,12);
-            bomb.sprite.visible = false;
-            bomb_tooltip.visible = false;
-            
-            //set last seen:
-            
-                alert_all_guards();
-                hero.lastSeenX = bomb.x;
-                hero.lastSeenY = bomb.y;
-                hero_last_seen.x = bomb.x;
-                hero_last_seen.y = bomb.y;
-                //repath alert guards to hero
-                notifyGuardsOfHeroLocation = true;
-            
-            //destroy nearby walls:
-            for(var w = 0; w < grid.cells.length; w++){
-                if(get_distance(bomb.x,bomb.y,grid.cells[w].x,grid.cells[w].y) < bomb_radius){
-                    var wallInfo = grid.getInfoFromIndex(w);
-                    //do not blow through map bounds walls
-                    if(wallInfo.x_index != 0 && wallInfo.x_index != grid.width-1 && wallInfo.y_index != 0 && wallInfo.y_index != grid.height-1){
-                        
-                        //test if any surrounding tiles are restricted:
-                        var makeRestricted = false;
-                        if(grid.isTileRestricted_coords(grid.cells[w].x-64,grid.cells[w].y))makeRestricted = true;
-                        if(grid.isTileRestricted_coords(grid.cells[w].x+64,grid.cells[w].y))makeRestricted = true;
-                        if(grid.isTileRestricted_coords(grid.cells[w].x,grid.cells[w].y-64))makeRestricted = true;
-                        if(grid.isTileRestricted_coords(grid.cells[w].x,grid.cells[w].y+64))makeRestricted = true;
-                        
-                        if(makeRestricted)grid.cells[w].changeImage(4);
-                        else{
-                            if(grid.cells[w].image_number != 1 && grid.cells[w].image_number != 3 && grid.cells[w].image_number != 4)grid.cells[w].changeImage(1);
-                        }
-                        
-                        grid.cells[w].solid = false;
-                        grid.cells[w].blocks_vision = false;
-                        grid.cells[w].door = false;
-                    
-                    }
-                
-                }
-            }
-            
-            //turn off the countdown
-            clearInterval(bomb_tooltip_interval);
-            //see if it kills anyone:
-            for(var g = 0; g < guards.length; g++){
-                var guard = guards[g];
-                if(get_distance(bomb.x,bomb.y,guard.x,guard.y) < bomb_radius){
-                    guard.kill(bomb.x,bomb.y);
-                
-                }
-            
-            }
-            //remove doodads in range:
-            for(var d = 0; d < doodads.length; d++){
-                if(get_distance(bomb.x,bomb.y,doodads[d].x,doodads[d].y) < bomb_radius+32){
-                    doodads[d].parent.removeChild(doodads[d].sprite);
-                    doodads.splice(d,1);
-                    d--;
-                
-                }
-            
-            }
-            
-            //make burn mark:
-            new jo_doodad(new PIXI.Sprite(img_burn_mark),display_effects,bomb.x,bomb.y);
-            
-            if(get_distance(bomb.x,bomb.y,hero.x,hero.y)<bomb_radius){
-                killHero(bomb.x,bomb.y);
-                
-            }
-            
         }
-    }, 10);
+    }
+    
+    //see if it kills anyone:
+    for(var g = 0; g < guards.length; g++){
+        var guard = guards[g];
+        if(get_distance(bomb.x,bomb.y,guard.x,guard.y) < bomb_radius){
+            guard.kill(bomb.x,bomb.y);
+        
+        }
+    
+    }
+    //remove doodads in range:
+    for(var d = 0; d < doodads.length; d++){
+        if(get_distance(bomb.x,bomb.y,doodads[d].x,doodads[d].y) < bomb_radius+32){
+            doodads[d].parent.removeChild(doodads[d].sprite);
+            doodads.splice(d,1);
+            d--;
+        
+        }
+    
+    }
+    
+    //The burn mark doodad used to be created here, but images/burn_mark.png is not in the
+    //spritesheet (or on disk) any more, so img_burn_mark was undefined and every explosion
+    //threw right here - which meant the hero was never checked against the blast below.
+    //Restore the doodad once the art exists again.
+
+    if(get_distance(bomb.x,bomb.y,hero.x,hero.y)<bomb_radius){
+        killHero(bomb.x,bomb.y);
+
+    }
 }
 function plantBomb(){
     //like set bomb, but doesn't start the fuse

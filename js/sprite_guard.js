@@ -25,7 +25,12 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         this.gun_shot_line.graphics.visible = false;
         this.hasRiotShield = hasRiotShield;
         this.reactionTimeMillis = 500;
-        
+        //Patrol repath throttling.
+        //Without this, a guard with an empty path runs a full A* every single frame, and a
+        //destination inside a sealed room (which never yields a path) makes that loop forever.
+        this.patrolRetryAt = 0;//timestamp (ms) before which getRandomPatrolPath() is a no-op
+        this.patrolFailStreak = 0;//consecutive searches that returned no path, drives the backoff
+
         //Add all sprites to sprite container
         this.feet_clip = jo_movie_clip("movie_clips/","feet_",8,".png")
         this.feet_clip.anchor.x = 0.5;
@@ -63,9 +68,19 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
                 
         }
         
+        //minimum gap between two patrol searches for one guard, even when they succeed
+        var PATROL_MIN_INTERVAL_MS = 250;
+        //backoff after a search that found no path: 250, 500, 1000, 2000, capped at 3000
+        var PATROL_BACKOFF_BASE_MS = 250;
+        var PATROL_BACKOFF_MAX_MS = 3000;
+
         this.getRandomPatrolPath = function(){
             //finds a path to patrol
-        
+
+            var now = performance.now();
+            //throttled: too soon since the last search (or still backing off from a failure)
+            if(now < this.patrolRetryAt)return;
+
             //if the sprite is able to move
             if(this.moving){
                 //find new patrol path:
@@ -75,12 +90,27 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
                 var currentIndex = grid.getIndexFromCoords_2d(this.x,this.y);
                 this.path = grid.getPath(currentIndex,newCellIndex);
                 //note: if a path is not found and this.path == [], the guard will idle again.
-                //console.log('path:');
-                //console.log(this.path);
+
+                if(this.path.length > 0){
+                    //found one, drop the backoff
+                    this.patrolFailStreak = 0;
+                    this.patrolRetryAt = now + PATROL_MIN_INTERVAL_MS;
+                }else{
+                    //the destination was unreachable (sealed room, or the guard is boxed in).
+                    //back off exponentially so we don't burn a full A* per frame retrying.
+                    this.patrolFailStreak++;
+                    var backoff = PATROL_BACKOFF_BASE_MS * Math.pow(2, this.patrolFailStreak - 1);
+                    if(backoff > PATROL_BACKOFF_MAX_MS)backoff = PATROL_BACKOFF_MAX_MS;
+                    //jitter so a whole squad of stuck guards doesn't search on the same frame
+                    this.patrolRetryAt = now + backoff + Math.random() * PATROL_BACKOFF_BASE_MS;
+                }
+            }else{
+                //can't move right now, check back shortly rather than every frame
+                this.patrolRetryAt = now + PATROL_MIN_INTERVAL_MS;
             }
             this.idling = false;
             this.startedIdling = false;
-        
+
         };
         
         this.pathToCoords = function(x,y){
