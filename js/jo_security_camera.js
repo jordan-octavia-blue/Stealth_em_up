@@ -35,7 +35,10 @@ function security_camera_wrapper(pixiSprite,x,y,maxswivel,minswivel){
         this.speed = 0.01;
         this.rotation = this.min;
         this.increasing = true;
-        this.wait_checker = new Date();
+        //Milliseconds left to pause at the end of a sweep. Was a pair of `new Date()` calls
+        //per camera per frame; now it's a plain countdown fed by the loop's deltaTime, so it
+        //also respects pause.
+        this.wait_remaining = this.wait_time;
         
         this.rad = this.min;//set rotation to min swivel
         
@@ -46,34 +49,33 @@ function security_camera_wrapper(pixiSprite,x,y,maxswivel,minswivel){
         The range of motion of rotation is 0 - 360
         
         */
-        this.swivel = function(){
-            var time = new Date();
-            if(time.getTime() >= this.wait_checker.getTime()+this.wait_time){
-            
-                if(this.increasing){
-                    this.rotation += this.speed;
-                    //allows rotation to loop around from 360deg to 0
-                    if(this.rotation > 2*Math.PI)this.rotation = 0;
-                    //reached limit, wait, then loop back
-                    if(Math.abs(this.rotation-this.max) <= 0.05){
-                        this.wait_checker = new Date();
-                        this.increasing = false;
-                    }
-                }else{
-                    this.rotation -= this.speed;
-                    //allows rotation to loop around from 0 to 360deg
-                    if(this.rotation < 0)this.rotation = 2*Math.PI;
-                    //reached limit, wait, then loop back
-                    if(Math.abs(this.rotation-this.min) <= 0.05){
-                        this.wait_checker = new Date();
-                        this.increasing = true;
-                    }
-
-                }
-                this.rad = this.rotation;
-            }else{
-                //console.log(time.getTime() , ' ' , wait_checker.getTime()+wait_time);
+        this.swivel = function(deltaTime){
+            if(this.wait_remaining > 0){
+                this.wait_remaining -= deltaTime;
+                return;
             }
+
+            if(this.increasing){
+                this.rotation += this.speed;
+                //allows rotation to loop around from 360deg to 0
+                if(this.rotation > 2*Math.PI)this.rotation = 0;
+                //reached limit, wait, then loop back
+                if(Math.abs(this.rotation-this.max) <= 0.05){
+                    this.wait_remaining = this.wait_time;
+                    this.increasing = false;
+                }
+            }else{
+                this.rotation -= this.speed;
+                //allows rotation to loop around from 0 to 360deg
+                if(this.rotation < 0)this.rotation = 2*Math.PI;
+                //reached limit, wait, then loop back
+                if(Math.abs(this.rotation-this.min) <= 0.05){
+                    this.wait_remaining = this.wait_time;
+                    this.increasing = true;
+                }
+
+            }
+            this.rad = this.rotation;
         }
         this.kill = function(){
             this.sprite.texture = (img_cam_broken);

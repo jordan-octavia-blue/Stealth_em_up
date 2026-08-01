@@ -374,7 +374,7 @@ the editing path (document a tmx→jomap conversion).
 
 Each phase ends with the game playable start-to-finish.
 
-### Phase 0 — Triage the current code (days)
+### Phase 0 — Triage the current code (days) ✅ done
 
 Fix the worst live bugs in place, before any restructuring, so later phases measure
 against a sane baseline:
@@ -391,6 +391,56 @@ against a sane baseline:
   **Keep** the disabled LOS/starburst code — it's replaced in Phase 4b, not dropped.
 - **Verify:** full playthrough (stealth win, loud win, death); record a Stats.js
   frame-time baseline with ~15 guards.
+
+#### What shipped
+
+Bug fixes:
+
+| Fix | Where |
+|---|---|
+| Patrol repath throttle: 250 ms minimum interval, plus exponential backoff (250→3000 ms, jittered) when a search returns no path | `sprite_guard.js` `getRandomPatrolPath` |
+| Misplaced paren — `get_distance(…, y < 100)` → `get_distance(…) < 100`, so alarmed guards only re-aim at a waypoint they are actually near | `main.js` `gameloop_guards` |
+| Blood trail baked into a `RenderTexture` every 200 splats, then the `Graphics` is cleared — the draw-command list is now bounded | `main.js` `drawBloodTrail` / `bakeBloodTrail` |
+| Three `console.log`s removed from the per-bullet riot-shield check | `main.js` `gameloop_bullets` |
+| Bomb fuse moved from a 10 ms `setInterval` to `gameloop_bomb(deltaTime)`; explosion body extracted to `explodeBomb()` | `main.js` |
+| Camera swivel wait moved from two `new Date()` calls per camera per frame to a `deltaTime` countdown | `jo_security_camera.js` `swivel(deltaTime)` |
+| **Found while verifying:** `img_burn_mark` is undefined (the art is gone from disk *and* the spritesheet), so *every* explosion threw before reaching the "did the blast kill the hero" check — the hero could stand on their own bomb and live. Burn-mark doodad removed; the blast damage check now runs. | `main.js` `explodeBomb` |
+
+The `wilLCauseAlert` typo needed no separate fix — it only existed in `gameloop_civs`, which
+was deleted with the rest of the civilian system.
+
+Deleted: `map_editor_js/` (23 files), `js/images.js`, `js/sprite_civ.js` + `gameloop_civs`
+and every `civs` reference, `drawPath.html`, `bin/OLD/`, `maps/get-data.php`,
+`maps/r2015.php`, and 222 lines of dead code from `jo_grid.js` (the two hardcoded legacy
+maps and the commented-out old `getPath`). `menu.html`'s community-map list XHR pointed at
+the now-deleted `maps/get-data.php`; that page is not the live entry point
+(`game.html?level=bank_1` is) and the request could never have worked on static hosting
+anyway. The disabled LOS/starburst code is untouched, as planned.
+
+#### Phase 0 baseline
+
+Measured headless (Chromium + Playwright, software rendering) on `bank_1`, alarmed squad
+with all backup spawned — **20 guards**, i.e. above the ~15 target. `gameloop()` wall time,
+sampled over 8 s:
+
+| | mean | p50 | p95 | max |
+|---|---|---|---|---|
+| master (pre-Phase 0) | 0.33 ms | 0.30 ms | 0.50 ms | 2.40 ms |
+| Phase 0 | 0.38 ms | 0.40 ms | 0.50 ms | **0.60 ms** |
+
+Mean is a wash on `bank_1` — the map is well connected, so patrol destinations are almost
+always reachable and the A\* storm rarely fires in ordinary play. The tail is where it shows:
+max frame cost drops 2.40 ms → 0.60 ms.
+
+The storm itself was measured directly, by stubbing `grid.getPath` to always return no path
+(the sealed-room case) and counting searches with 6 guards:
+
+| | A\*/sec, normal patrol | A\*/sec, all destinations unreachable |
+|---|---|---|
+| master | ~0 | **166** |
+| Phase 0 | ~0.3 | **8** |
+
+Use these numbers as the reference point for the Phase 3 and Phase 4 comparisons.
 
 ### Phase 1 — Tooling: Vite + TypeScript + Vitest (days)
 
@@ -481,6 +531,25 @@ If motivation needs a fun win early, pull Phase 7 forward to right after Phase 4
 
 1. **Manual smoke checklist at every phase boundary** (keep it in this doc): load bank_1 →
    stealth to the loot → get spotted → loud fight → escape or die. Five minutes.
+
+   Run `game.html?volume=1.0&level=bank_1` and tick off:
+
+   - [ ] Map loads, hero spawns, no console errors.
+   - [ ] WASD moves the hero; the hero slides along walls instead of sticking.
+   - [ ] Guards patrol — they pick new destinations and walk them, they don't freeze.
+   - [ ] Security cameras sweep, pause at each end of the arc, and reverse.
+   - [ ] Sneak to the loot unseen; picking it up works.
+   - [ ] Get spotted: the "?!" alert shows, the guard shoots, the squad goes on alert.
+   - [ ] Shoot a guard: blood splatter, a blood trail while dragging the body, gun drops.
+   - [ ] Plant and detonate a bomb: fuse counts down, walls in the blast open up, guards in
+         range die, and standing on it kills the hero.
+   - [ ] Pause mid-fuse — the countdown freezes and resumes correctly.
+   - [ ] Reach the van with the loot and win; then die and confirm the death/restart flow.
+
+   Phase 0 note: the checklist above was verified headlessly (Playwright driving Chromium),
+   including guard patrol, camera swivel, blood trail, and the full bomb/pause/blast path.
+   A human playthrough is still worth doing for *feel* — the automated pass only proves
+   nothing throws and the state changes are correct.
 2. **Vitest for all pure logic:** nav (search, regions, flow fields, costs, decay), FSM
    transitions, clock, map-version migration, math. Target near-full coverage on
    pathfinding and AI-transition logic; physics *feel* and rendering are verified by play.
