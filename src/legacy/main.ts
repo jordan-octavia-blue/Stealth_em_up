@@ -9,7 +9,10 @@ import { mouseMove, addKeyHandlers, removeHandlers } from '../systems/input';
 import { updateCamera } from '../systems/camera';
 import { updateParticles, shardParticleSplatter, bloodParticleSplatter, ejectShell } from '../systems/particles';
 import { nav } from '../nav';
+import { physics, CATEGORY } from '../physics';
 import { drawNavDebug, resetNavDebug } from '../systems/nav_debug';
+import { drawPhysicsDebug, resetPhysicsDebug } from '../systems/physics_debug';
+import { setupFog, updateFog, resetFog, FOG_RADIUS } from '../render/fog';
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 /*
@@ -22,7 +25,9 @@ window.stage ??= undefined;
 window.window_properties ??= undefined;
 window.renderer ??= undefined;
 window.mouse_relative = {x:0,y:0};
-window.enableLOS = false;
+//Phase 4b: fog of war is back on. It was switched off years before the roadmap and the
+//starburst behind it could not have been usefully switched back on — see src/render/fog.ts.
+window.enableLOS = true;
 
 window.wabbitTexture = new PIXI.Texture.fromImage("../images/shell.png");
 window.particle_container ??= undefined;	
@@ -120,21 +125,10 @@ window.clickEvent ??= undefined;
 window.stage_child ??= undefined;
 
 
-/*
-New LOS Graphics:
-*/
-window.losTexture ??= undefined;
-window.losSprite ??= undefined;
-//a big transparent rectangle of black that covers the whole grid
-window.losShade ??= undefined;
-window.losShadeContainer ??= undefined;
-//the mask for losShade which will be rendered on to losTexture
-window.losPathGraphics ??= undefined;
-window.losPathGraphicsContainer ??= undefined;
+//The fog-of-war mask pipeline (render texture, shade, mask graphics) moved to
+//src/render/fog.ts along with the sweep that fills it.
 
 window.spyglassPos ??= undefined;
-//
-//Change to hero.losPoints: var losPoints;//the constantly updated list of points and angles that allows for drawing the losPath;
 
 window.grid_width ??= undefined;
 window.grid_height ??= undefined;
@@ -222,11 +216,7 @@ window.bullets ??= undefined;
             window.hero ??= undefined;
             window.hero_last_seen ??= undefined;
             window.hero_end_aim_coord ??= undefined;
-            window.starburst ??= undefined;
-            window.debug_LOS_starburst = false; 
-            window.starburst_ray ??= undefined;
-            window.starburst_angles ??= undefined;
-            
+
 			
 			window.hero_drag_target ??= undefined; // a special var reserved for when the hero is dragging something.
 			window.guards ??= undefined;
@@ -344,11 +334,15 @@ function clearStage(){
     //removeHandlers:
     console.log('clear stage');
     removeHandlers();
-    //drop nav state with the run it belongs to: queued path requests hold references to
-    //guards from the game being torn down, and the debug overlay's Graphics is about to
-    //be removed with its container.
+    //drop nav and physics state with the run they belong to: queued path requests hold
+    //references to guards from the game being torn down, every body in the world belongs
+    //to a sprite that is about to be dropped, and the debug overlays' Graphics are about
+    //to be removed with their container.
     nav.reset();
+    physics.reset();
     resetNavDebug();
+    resetPhysicsDebug();
+    resetFog();
     //remove all children:
     removeAllChildren(display_tiles);
     removeAllChildren(display_blood);
@@ -573,7 +567,13 @@ function setup_map(map){
     //opening a wall) reach nav through the `nav:dirty` event.
     nav.build(grid);
 
-    
+    //Static collision geometry (roadmap §3.2): one body for the map with a 2 m box
+    //fixture per solid cell. Built before anything that seals a tile under itself (the
+    //van, the security computer) — those go through `grid.makeWallSolid`, which reaches
+    //both nav and physics through the same event.
+    physics.build(grid);
+
+
     //whole map width and height:
     grid_width = grid.width*grid.cell_size;
     grid_height = grid.height*grid.cell_size;
@@ -585,36 +585,9 @@ function setup_map(map){
     display_blood.addChildAt(blood_trail_sprite,0);
     blood_trail_pending = 0;
 
-    /*
-    New LOS Graphics:
-    */
-    losTexture = new PIXI.RenderTexture(renderer,grid.width*grid.cell_size,grid.height*grid.cell_size);
-    losSprite = new PIXI.Sprite(losTexture);
-	stage_child.addChild(losSprite);
-    
-    losShade = new PIXI.Graphics();
-    //draw the shade:
-    losShade.clear();
-    losShade.alpha = 0.7;
-    losShade.beginFill(0);
-    losShade.drawPolygon([0,0,grid_width,0,grid_width,grid_height,0,grid_height,0,0]);
-    
-    losShadeContainer = new PIXI.Container();
-    
-    if(enableLOS){
-        losPathGraphics = new PIXI.Graphics();
-        losPathGraphicsContainer = new PIXI.Container();
-        losPathGraphicsContainer.addChild(losPathGraphics);
-    }
-    
-    //new for V3
-    losShadeContainer.addChild(losShade);
-    stage_child.addChild(losShadeContainer);//for line of sight
-    
-    //add the mask:
-	losShadeContainer.mask = losSprite;
-    
-    
+    //Fog of war: mask texture, shade and sweep all live in src/render/fog.ts now.
+    setupFog();
+
     display_tiles_walls.addChild(tile_containers[0]);//add ParticleContaineres, black walls
     display_tiles_walls.addChild(tile_containers[2]);//add ParticleContaineres, brown furnature
     display_tiles.addChild(tile_containers[1]);//add ParticleContaineres
@@ -624,14 +597,12 @@ function setup_map(map){
     
             //make sprites:
 			hero = new sprite_hero_wrapper(new PIXI.Sprite(img_hero_body),4,8);
-            hero.losPath = [];
-            hero.losPoints = [];
 			//hero_end_aim_coord;
-            starburst = new debug_line();
-            starburst_ray = new Ray(0,0,0,0);
 
             hero.x = map.objects.hero[0];
             hero.y = map.objects.hero[1];
+            //dynamic circle, fixedRotation — facing stays a game-logic angle (§3.2)
+            physics.addHero(hero, hero.radius);
 			hero.speed = hero.speed_walk;
             hero_drag_target = null; // a special var reserved for when the hero is dragging something.
 
@@ -648,6 +619,7 @@ function setup_map(map){
                 var guard_inst = new sprite_guard_wrapper(new PIXI.Sprite(guard_img),hasRiotShield);
                 guard_inst.x = map.objects.guards[i][0];
                 guard_inst.y = map.objects.guards[i][1];
+                physics.addGuard(guard_inst, guard_inst.radius);
                 guard_inst.getRandomPatrolPath();
                 guards.push(guard_inst);
             }
@@ -665,7 +637,6 @@ function setup_map(map){
 			security_cameras = [];
             for(var i = 0; i < map.objects.security_cams.length; i++){
                 var cam_inst = new security_camera_wrapper(new PIXI.Sprite(img_security_camera),map.objects.security_cams[i].pos[0],map.objects.security_cams[i].pos[1],map.objects.security_cams[i].swivel_max,map.objects.security_cams[i].swivel_min);
-                cam_inst.setupLOS();//finds the points for the camera to consider when drawing los
                 security_cameras.push(cam_inst);
             }
             
@@ -683,13 +654,6 @@ function setup_map(map){
 			money.x = map.objects.loot[0];
 			money.y = map.objects.loot[1];
             loot.push(money);
-
-            
-            
-            // Finds the points for the camera to consider when drawing los
-            if(enableLOS){
-                hero.setupLOS();
-            }
 
 }
 ////////////////////////////////////////////////////////////
@@ -733,7 +697,10 @@ function animate(time) {
         }
         stats.end();//Mr Doob's Stats.js
 
-
+        //Fog is a render concern: one sweep per picture, whether this frame ran zero
+        //fixed steps (a 144 Hz display) or four (a slow one). It also has to keep
+        //running while paused, or the screen would go stale.
+        updateFog();
     }
 
     // render the stage
@@ -768,7 +735,12 @@ function gameloop_guards(deltaTime){
                 //Only show the gaurds if they are within vision of the hero or a hacked camera:
                 //if(guard.isRaycastUnobstructedBetweenTheseIgnoreDoor(hero){
                 //if the spyglass is in a door, the raycast should ignore the door
-                if(hero.spyglass_equipped && spyglassPos.inDoor && guard.isRaycastUnobstructedBetweenTheseIgnoreDoor({x:spyglassPos.x,y:spyglassPos.y})){
+                //Out of fog range is out of sight, so a guard can't be visible somewhere
+                //the mask is drawing as dark.
+                var inFogRange = get_distance(guard.x,guard.y,spyglassPos.x,spyglassPos.y) <= FOG_RADIUS;
+                if(!inFogRange){
+                    guard.sprite.visible = false;
+                }else if(hero.spyglass_equipped && spyglassPos.inDoor && guard.isRaycastUnobstructedBetweenTheseIgnoreDoor({x:spyglassPos.x,y:spyglassPos.y})){
                     guard.sprite.visible = true;
                 //else it should not ignore doors:
                 }else if(guard.isRaycastUnobstructedBetweenThese({x:spyglassPos.x,y:spyglassPos.y})){
@@ -793,7 +765,7 @@ function gameloop_guards(deltaTime){
             if(guard.can_shoot){
                 
                 //take the ray from guard to hero and make it go all the way to the wall:
-                var guard_aim_to_wall = getRaycastPoint(guard.x,guard.y,hero.x+aim_x_offset,hero.y+aim_y_offset);
+                var guard_aim_to_wall = physics.sightStop(guard.x,guard.y,hero.x+aim_x_offset,hero.y+aim_y_offset);
                 guard.aim.set(guard.x,guard.y,guard_aim_to_wall.x,guard_aim_to_wall.y);
             }
             
@@ -933,18 +905,20 @@ function gameloop_guards(deltaTime){
             if(guard.move_to_target()){
                 guard.target.x = null;
                 guard.target.y = null;
+            }else if(guard.checkStuck()){
+                //Guards are solid now, so "walking at a waypoint" and "getting there" are
+                //no longer the same thing — two of them can wedge in a doorway. Drop the
+                //route and let nav hand out a new one.
+                guard.target.x = null;
+                guard.target.y = null;
+                guard.path = [];
+                guard.chasingHero = false;
             }
-            
+
         }
-        guard.prepare_for_draw();
-        
-        //collide with other guards so they don't overlap:
-        //start at i+1 so it checks all the guards who haven't already been checked for collision
-        for(var other_guard_index = i+1; other_guard_index < guards.length; other_guard_index++){
-            if(guard.alive && guards[other_guard_index].alive){
-                guard.unit_to_unit_collide({x:guards[other_guard_index].x-1,y:guards[other_guard_index].y-1},10);
-            }
-        }
+        //Guard-vs-guard separation used to be an O(n^2) pushout right here. Both are
+        //dynamic bodies now; the contact solver keeps them apart, and it also keeps them
+        //out of walls, which the old code never did at all.
     }
 }
 function gameloop_security_cams(deltaTime){
@@ -1028,120 +1002,104 @@ function gameloop_security_cams(deltaTime){
     computer_for_security_cameras.prepare_for_draw();
     
 }
+function removeBullet(index){
+    var bullet = bullets[index];
+    display_actors.removeChild(bullet.sprite);
+    bullets.splice(index,1);
+}
 function gameloop_bullets(deltaTime){
     //////////////////////
     //Bullets
     //////////////////////
+    //Bullets still fly — you can watch a shot cross a room and dive out of its way —
+    //but everything they might hit is resolved by ONE physics raycast over the segment
+    //covered this step. Walls, doors and people come out of the same filtered query, so
+    //this replaces both the grid-DDA raycast at spawn *and* the per-bullet loop that did
+    //circle-vs-segment maths against every guard on the map.
     bulletLoop:
     for(var b = 0; b < bullets.length; b++){
         var bullet = bullets[b];
         bullet.prepare_for_draw();
-        //call move to target, if target is reached, it should remove the bullet
-        
-        var bulletPosBeforeMove = {x:bullet.x,y:bullet.y};//to check if a bullet kills a target, check if the prev position to the move position intersects the target
-        //continued: this is because bullet path between frames looks like      a--------x------b
-        //a: bullet start pos, b: bullet end pos, x: target  
-        
-        if(bullet.move_to_target()){
-            //if true, bullet hits wall
-            
-            //TODO old, replace with particles:
-            //play gun spark against wall where gun shot hits:
-            //bullet.target.x.y
-            var splatter_angle = grid.angleBetweenPoints(bullet.x,bullet.y,bullet.target.x,bullet.target.y)
-            shardParticleSplatter(-splatter_angle,bullet.target);
-            
-            //destroy bullet
-            display_actors.removeChild(bullet.sprite);
-            bullets.splice(b,1);
+
+        //the bullet's path between frames looks like   a--------x------b
+        //a: start pos, b: end pos, x: whatever it passed through on the way
+        var fromX = bullet.x;
+        var fromY = bullet.y;
+        var reachedEnd = bullet.move_to_target();
+        bullet.rotate_to_instant(bullet.target.x,bullet.target.y);
+        //move_to_target stops short rather than overshooting, so on the last step the
+        //bullet does not move at all — test the remaining stretch to its target or
+        //anyone standing in that final gap would never be hit.
+        var toX = reachedEnd ? bullet.target.x : bullet.x;
+        var toY = reachedEnd ? bullet.target.y : bullet.y;
+
+        //A guard's bullet looks for the hero, the hero's looks for guards. Guards have
+        //never shot each other and Phase 4 is not the phase to start.
+        var mask = CATEGORY.VISION_BLOCKER | (bullet.ignore == hero ? CATEGORY.GUARD : CATEGORY.HERO);
+        var hit = physics.bulletHit(fromX,fromY,toX,toY,bullet.ignore,mask);
+
+        //A dragged corpse and a security camera have no physics body — a corpse gives up
+        //its body when it dies so it can be dragged. Two explicit checks rather than two
+        //more collision categories.
+        if(bullet.ignore != hero && hero_drag_target && circle_linesetment_intersect(hero_drag_target.getCircleInfoForUtilityLib(),{x:fromX,y:fromY},{x:toX,y:toY})){
+            if(hero_drag_target.alive)hero_drag_target.kill();
+            bloodParticleSplatter(grid.angleBetweenPoints(fromX,fromY,hero_drag_target.x,hero_drag_target.y),hero_drag_target);
+            removeBullet(b);
+            b--;
             continue bulletLoop;
         }
-        bullet.rotate_to_instant(bullet.target.x,bullet.target.y);
-        
-        
-        //Who does the bullet kill:
-            //bullets shot by hero can kill:
-                //cameras, guards
-            //bullets shot by guards can kill:
-                //hero, cameras, hero_drag_target
-            
-        //if the hero shot the bullet check if bullet intersects guard:
-        if(bullet.ignore == hero){
-            for(var i = 0; i < guards.length; i++){
-                var guard = guards[i];
-                    
-                if(bullet.ignore == guard)continue;//don't kill the shooter with his own bullet
-                if(guard.alive && circle_linesetment_intersect(guard.getCircleInfoForUtilityLib(),bulletPosBeforeMove,{x:bullet.x,y:bullet.y})){
-                    var guardDies = true;
-                    var splatter_angle = grid.angleBetweenPoints(hero.x,hero.y,guard.x,guard.y);
-                    
-                    if(guard.hasRiotShield && guard.alarmed){
-                        // check to see if riot shield blocks bullet:
-                        // Riot shield is only active when the guard is alarmed
-                        var angleInArc = angleInArcRad(guard.rad,Math.PI/2,Math.PI+splatter_angle)
-                        if(angleInArc){
-                            guardDies = false;
-                            shardParticleSplatter(splatter_angle,guard);
-                        }
-                        
-                    }
-                    if(guardDies){
-                        guard.kill(hero.x,hero.y);
-                        //make blood splatter:
-                        //The angle is hero and not bullet, because if the bullet hits the guard off to the side it causes a strange splatter
-                        bloodParticleSplatter(splatter_angle,guard);
-                        //make blood trail:
-                        guard.blood_trail = true;
-                        
-                        if(guard.alarmed && !backupCalled)newMessage("You dispatch the guard before he can get the word out!");
-                        
-                        
-                        //add to stats:
-                        jo_store_inc("guardsShot");
-                    }
-                    
-                    //destroy bullet
-                    display_actors.removeChild(bullet.sprite);
-                    bullets.splice(b,1);
-                    continue bulletLoop;
-
-                }
-            
-            }
-        }else{
-            //check if bullet intersects hero_drag_target
-            if(hero_drag_target && circle_linesetment_intersect(hero_drag_target.getCircleInfoForUtilityLib(),bulletPosBeforeMove,{x:bullet.x,y:bullet.y})){
-                if(hero_drag_target.alive)hero_drag_target.kill();
-                //splatter
-                var splatter_angle = grid.angleBetweenPoints(bulletPosBeforeMove.x,bulletPosBeforeMove.y,hero_drag_target.x,hero_drag_target.y);
-                bloodParticleSplatter(splatter_angle,hero_drag_target);
-                //destroy bullet
-                display_actors.removeChild(bullet.sprite);
-                bullets.splice(b,1);
-                continue bulletLoop;
-
-            }
-            //check if bullet intersects with hero
-                //ignore:: //don't kill the shooter with his own bullet
-            if(bullet.ignore != hero && hero.alive && circle_linesetment_intersect(hero.getCircleInfoForUtilityLib(),bulletPosBeforeMove,{x:bullet.x,y:bullet.y})){
-                hero.hurt(bullet.ignore.x,bullet.ignore.y);
-                
-                //destroy bullet
-                display_actors.removeChild(bullet.sprite);
-                bullets.splice(b,1);
-                continue bulletLoop;
-
-            }
-        }
-        //check if bullet intersects camera:
         for(var i = 0; i < security_cameras.length; i++){
-            if(circle_linesetment_intersect(security_cameras[i].getCircleInfoForUtilityLib(),bulletPosBeforeMove,{x:bullet.x,y:bullet.y})){
+            if(circle_linesetment_intersect(security_cameras[i].getCircleInfoForUtilityLib(),{x:fromX,y:fromY},{x:toX,y:toY})){
                 security_cameras[i].kill();
             }
-        
+        }
+
+        if(hit && hit.owner){
+            var victim: any = hit.owner;
+            if(victim === hero){
+                if(hero.alive)hero.hurt(bullet.ignore.x,bullet.ignore.y);
+            }else if(victim.alive){
+                var guardDies = true;
+                //The angle is from the shooter and not the bullet, because a bullet that
+                //hits the guard off to the side causes a strange splatter
+                var splatter_angle = grid.angleBetweenPoints(bullet.ignore.x,bullet.ignore.y,victim.x,victim.y);
+
+                if(victim.hasRiotShield && victim.alarmed){
+                    // check to see if riot shield blocks bullet:
+                    // Riot shield is only active when the guard is alarmed
+                    if(angleInArcRad(victim.rad,Math.PI/2,Math.PI+splatter_angle)){
+                        guardDies = false;
+                        shardParticleSplatter(splatter_angle,victim);
+                    }
+                }
+                if(guardDies){
+                    victim.kill(bullet.ignore.x,bullet.ignore.y);
+                    //make blood splatter:
+                    bloodParticleSplatter(splatter_angle,victim);
+                    //make blood trail:
+                    victim.blood_trail = true;
+
+                    if(victim.alarmed && !backupCalled)newMessage("You dispatch the guard before he can get the word out!");
+
+                    //add to stats:
+                    if(bullet.ignore == hero)jo_store_inc("guardsShot");
+                }
+            }
+            //destroy bullet
+            removeBullet(b);
+            b--;
+            continue bulletLoop;
+        }
+        if(hit || reachedEnd){
+            //hit a wall: play a gun spark where the shot lands
+            var end = hit ? hit : bullet.target;
+            shardParticleSplatter(-grid.angleBetweenPoints(fromX,fromY,end.x,end.y),end);
+            removeBullet(b);
+            b--;
+            continue bulletLoop;
         }
     }
-    
+
 }
 function gameloop_doors(deltaTime){
     //////////////////////
@@ -1149,24 +1107,25 @@ function gameloop_doors(deltaTime){
     //////////////////////
     for(var d = 0; d < grid.door_sprites.length; d++){
         var door_inst = grid.door_sprites[d];
-        //door is anchored at top, so account for offset when checking distance
-        var door_center_y_offset = 32;
-        var door_center_x_offset = 0;
-        if(door_inst.horizontal){
-            door_center_y_offset = 0;
-            door_center_x_offset = -32;
-        }
-        door_inst.openerNear = false; 
-        for(var g = 0; g < guards.length; g++){
-        //check if any guard is near door_inst, open door_inst:
+        var door_wall = door_inst.relatedDoorWall;
+        //Both door orientations work out to the centre of the cell they sit in; the old
+        //code got there from the sprite's anchor offsets.
+        var door_center_x = door_wall.x + grid.cell_size/2;
+        var door_center_y = door_wall.y + grid.cell_size/2;
+        door_inst.openerNear = false;
+        //Which guards are near a door is contact bookkeeping now: the door's sensor
+        //fixture reports who is inside it, so only those few get an exact distance test.
+        //This used to be a nested doors x guards loop over the whole squad, every frame.
+        var openers = physics.openersNear(door_wall.cellIndex());
+        openers.forEach(function(unit: any){
             //this radius is very important!  If door_inst doesn't detect unit close enough, the "wall" tile that it is on will be solid and unit won't be able to get close enough
-            if(get_distance(door_inst.x+door_center_x_offset,door_inst.y+door_center_y_offset,guards[g].x,guards[g].y) <= guards[g].radius*4){
-               door_inst.openerNear = true;
+            if(unit !== hero && unit.alive && get_distance(door_center_x,door_center_y,unit.x,unit.y) <= unit.radius*4){
+                door_inst.openerNear = true;
             }
-        }
+        });
         //if hero can open door_inst:
         //this radius is very important!  If door_inst doesn't detect unit close enough, the "wall" tile that it is on will be solid and unit won't be able to get close enough
-        if(get_distance(door_inst.x+door_center_x_offset,door_inst.y+door_center_y_offset,hero.x,hero.y) <= hero.radius*4){
+        if(get_distance(door_center_x,door_center_y,hero.x,hero.y) <= hero.radius*4){
             if(door_inst.unlocked)door_inst.openerNear = true;
             //if hero is sprinting and able to kick down doors:
             if(hero.ability_kick_doors && keys['shift']){
@@ -1357,284 +1316,20 @@ function pickUpGunDrop(gunDrop){
     gunDrop.flag_for_removal = true;
 
 }
-//called every loop to recheck LOS
-//limit angle limits the view range of the los by limitAngle from the units rotation
-function make_starburst(unit,limitAngle){
-    if(!enableLOS){
-        return
-    }
-    starburst.clear();
-    var raycast;
-    var first: any = {};
-
-    unit.losPath.push(unit.x,unit.y);
-    var lastPoint;
-    var relevantCorner = false;
-    for(var i = 0; i < unit.losPoints.length; i++){
-        //update angle:
-        unit.losPoints[i].angle = findAngleBetweenPoints(unit.losPoints[i].true_point,unit);
-    }
-    
-    //sort unit.losPoints by angle:
-    unit.losPoints = quickSort(unit.losPoints,0,unit.losPoints.length-1);
-    
-    var noray;
-    var true_point;
-    var true_point_angle;
-    if(limitAngle!=undefined){
-        //raycast point:
-        //test_cone.graphics.clear();
-        //hero_cir.graphics.clear();
-        var dx = 10000*Math.cos(unit.rotation-limitAngle/2);
-        var dy = 10000*Math.sin(unit.rotation-limitAngle/2);
-        
-        //console.log('-----------------------');
-        //console.log((unit.rotation-limitAngle/2)*180/Math.PI);
-        //console.log((unit.rotation+limitAngle/2)*180/Math.PI);
-        var ray = getRaycastPoint(unit.x,unit.y,dx+unit.x,dy+unit.y);
-        //test_cone.draw_Ray_without_clear({start:{x:unit.x,y:unit.y},end:{x:ray.x,y:ray.y}},0xaa0000);
-        
-        //Push the CCW most side of the camera's view
-        unit.losPath.push(ray.x,ray.y); 
-        //first.x = ray.x;
-        // first.y = ray.y;
-        
-        //reorder starting with leftmost:
-        var firstMostAngle = findAngleBetweenPoints({x:ray.x,y:ray.y},unit);
-        var max = unit.losPoints.length;
-        for(var i = 0; i < max; i++){
-            //test_cone.draw_Ray_without_clear({start:{x:unit.x,y:unit.y},end:{x:unit.losPoints[i].true_point.x,y:unit.losPoints[i].true_point.y}},0x0000aa);
-            if(unit.losPoints[i].angle < firstMostAngle){
-                //move point to back of the array:
-                var moveToBack = unit.losPoints.splice(i,1)[0];
-                unit.losPoints.push(moveToBack);
-                i--;
-                max--;
-            }
-        }
-        
-        
-    }
-    
-    //Use the losPoints to update the losPath(which is refreshed every loop
-    for(var i = 0; i < unit.losPoints.length; i++){
-        //TODO 5/9/2015
-        true_point = unit.losPoints[i].true_point;
-        noray = unit.losPoints[i].noray;
-        true_point_angle = unit.losPoints[i].angle;
-        
-        
-        raycast = getRaycastPoint(unit.x,unit.y,true_point.x,true_point.y);
-        //if raycast point if farther away from unit than true point, then add the true point as a draw point:
-        var ray_to_unit = get_distance(unit.x,unit.y,raycast.x,raycast.y);
-        var ray_to_true = get_distance(unit.x,unit.y,true_point.x,true_point.y);
-        relevantCorner = false;
-
-        //find the corners that are visible to the unit
-        //possible room for optimization in the getRaycastPoint function
-        if(ray_to_true < ray_to_unit || (Math.abs(ray_to_unit - ray_to_true) < 100)){
-            //NOTE: at steep angles, the second part of this if statement may not evaluate to true.  Just change 100 to a greater number if this happens.
-            relevantCorner = true;
-        }
-        if(debug_LOS_starburst){
-            starburst_ray.set(unit.x,unit.y,raycast.x,raycast.y);
-            if(relevantCorner){
-                if(!noray){
-                    //normal
-                    starburst_ray.set(unit.x,unit.y,raycast.x,raycast.y);
-                    starburst.draw_Ray_without_clear(starburst_ray,0xff0000);
-                }else{
-                    starburst_ray.set(unit.x,unit.y,true_point.x,true_point.y);
-                    starburst.draw_Ray_without_clear(starburst_ray,0x00ff00);
-                }
-                
-            }//else if(noray)starburst.draw_Ray_without_clear(starburst_ray,0xff0000);
-        
-        }
-        
-        //how you draw the triangle poly:
-        //A B C A C D A D F A F
-        //create unit.losPath
-        if(i >= 1){
-            //start point between every two other points
-            if(relevantCorner){
-             
-                if(noray){
-                    //if this starburst is being limited within an angle range (like a security camera):
-                    if(limitAngle!=undefined){
-                        //and it is within that arc (The + Math.PI is just needed for some reason, the cameras rotation is backwards for the algorithm)
-                        if(angleInArcRad(unit.rotation+Math.PI,limitAngle,true_point_angle)){
-                            unit.losPath.push(true_point.x,true_point.y,unit.x,unit.y,true_point.x,true_point.y); 
-                            //test_cone.draw_Ray_without_clear({start:{x:unit.x,y:unit.y},end:{x:true_point.x,y:true_point.y}},0xff00aa);
-                            lastPoint = true_point;
-                
-                        }
-                    }else{
-                        unit.losPath.push(true_point.x,true_point.y,unit.x,unit.y,true_point.x,true_point.y); 
-                        lastPoint = true_point;
-                    }
-        
-                }else{
-                    
-                    //if this starburst is being limited within an angle range (like a security camera):
-                    if(limitAngle!=undefined){
-                        //and it is within that arc (The + Math.PI is just needed for some reason, the cameras rotation is backwards for the algorithm)
-                        if(angleInArcRad(unit.rotation+Math.PI,limitAngle,true_point_angle)){                            
-                            //console.log(true);
-                            unit.losPath.push(raycast.x,raycast.y,unit.x,unit.y,raycast.x,raycast.y); 
-                            //test_cone.draw_Ray_without_clear({start:{x:unit.x,y:unit.y},end:{x:raycast.x,y:raycast.y}},0x00ffaa);
-                            lastPoint = raycast;
-                        }
-                    }else{
-                        unit.losPath.push(raycast.x,raycast.y,unit.x,unit.y,raycast.x,raycast.y); 
-                        lastPoint = raycast;
-                    }
-                }
-            }
-            //unit.losPath.push(raycast.x,raycast.y,unit.x,unit.y,raycast.x,raycast.y); 
-            
-            
-        }
-        if(Object.keys(first).length == 0){
-            //if this starburst is being limited within an angle range (like a security camera):
-            if(limitAngle!=undefined){
-                //and it is within that arc (The + Math.PI is just needed for some reason, the cameras rotation is backwards for the algorithm)
-                if(angleInArcRad(unit.rotation+Math.PI,limitAngle,true_point_angle)){                   
-                            //console.log(true);
-                    unit.losPath.push(raycast.x,raycast.y); 
-                    //test_cone.draw_Ray_without_clear({start:{x:unit.x,y:unit.y},end:{x:raycast.x,y:raycast.y}},0x0000aa);
-                    first.x = raycast.x;
-                    first.y = raycast.y;
-                    //hero_cir.draw(moveToBack.true_point.x,moveToBack.true_point.y,50,true);
-                }
-            }else{
-                unit.losPath.push(raycast.x,raycast.y); 
-                first.x = raycast.x;
-                first.y = raycast.y;
-            }
-            
-        }
-        
-            
-    }
-    
-    if(limitAngle!=undefined){
-        //raycast point:
-        
-        var dx2 = 10000*Math.cos(unit.rotation+limitAngle/2);
-        var dy2 = 10000*Math.sin(unit.rotation+limitAngle/2);
-        var ray2 = getRaycastPoint(unit.x,unit.y,dx2+unit.x,dy2+unit.y);
-        //test_cone.draw_Ray_without_clear({start:{x:unit.x,y:unit.y},end:{x:ray2.x,y:ray2.y}},0x00aa00);
-        unit.losPath.push(ray2.x,ray2.y,unit.x,unit.y,ray2.x,ray2.y); 
-        
-    }
-    //if the first point exists, finish the losPath by drawing back to hero
-    if(first.length != 0 && limitAngle==undefined)unit.losPath.push(first.x,first.y,unit.x,unit.y);
-    //test show losPath (big red transparent circles
-    //for(var i = 0; i < unit.losPath.length-1; i+=2){
-        //hero_cir.draw(unit.losPath[i],unit.losPath[i+1],i,true);
-    //}
-    
-}
-function make_starburst_with_modified_view(unit,newX,newY){
-    //calls make_starburst_without_limit() but with a faked x and y
-    //this is useful for a spyglass tool that changes the starburst perspective of 
-    //the unit;
-    var realX = unit.x;
-    var realY = unit.y;
-    unit.x = newX;
-    unit.y = newY;
-    make_starburst_without_limit(unit);
-    unit.x = realX;
-    unit.y = realY;
-}
-//360 degrees of view:
-function make_starburst_without_limit(unit){
-    if(!enableLOS){
-        return
-    }
-    starburst.clear();
-    var raycast;
-    var first: any = {};
-
-    unit.losPath.push(unit.x,unit.y);
-    var lastPoint;
-    var relevantCorner = false;
-    for(var i = 0; i < unit.losPoints.length; i++){
-        //update angle:
-        unit.losPoints[i].angle = findAngleBetweenPoints(unit.losPoints[i].true_point,unit);
-    }
-    
-    //sort unit.losPoints by angle:
-    unit.losPoints = quickSort(unit.losPoints,0,unit.losPoints.length-1);
-    
-    var noray;
-    var true_point;
-    for(var i = 0; i < unit.losPoints.length; i++){
-        true_point = unit.losPoints[i].true_point;
-        noray = unit.losPoints[i].noray;
-        
-        
-        raycast = getRaycastPoint(unit.x,unit.y,true_point.x,true_point.y);
-        //if raycast point if farther away from unit than true point, then add the true point as a draw point:
-        var ray_to_unit = get_distance(unit.x,unit.y,raycast.x,raycast.y);
-        var ray_to_true = get_distance(unit.x,unit.y,true_point.x,true_point.y);
-        relevantCorner = false;
-
-        //find the corners that are visible to the unit
-        //possible room for optimization in the getRaycastPoint function
-        if(ray_to_true < ray_to_unit || (Math.abs(ray_to_unit - ray_to_true) < 10)){
-            relevantCorner = true;
-        }
-        if(debug_LOS_starburst){
-            starburst_ray.set(unit.x,unit.y,raycast.x,raycast.y);
-            if(relevantCorner){
-                if(!noray){
-                    //normal
-                    starburst_ray.set(unit.x,unit.y,raycast.x,raycast.y);
-                    starburst.draw_Ray_without_clear(starburst_ray,0x0000ff);
-                }else{
-                    starburst_ray.set(unit.x,unit.y,true_point.x,true_point.y);
-                    starburst.draw_Ray_without_clear(starburst_ray,0x00ff00);
-                }
-                
-            }//else if(noray)starburst.draw_Ray_without_clear(starburst_ray,0xff0000);
-        
-        }
-        
-        //how you draw the triangle poly:
-        //A B C A C D A D F A F
-        //create unit.losPath
-        if(i > 1){
-            //start point between every two other points
-            if(relevantCorner){
-             
-                if(noray){
-                    unit.losPath.push(true_point.x,true_point.y,unit.x,unit.y,true_point.x,true_point.y); 
-                    lastPoint = true_point;
-        
-                }else{
-                    unit.losPath.push(raycast.x,raycast.y,unit.x,unit.y,raycast.x,raycast.y); 
-                    lastPoint = raycast;
-                }
-            }
-            //unit.losPath.push(raycast.x,raycast.y,unit.x,unit.y,raycast.x,raycast.y); 
-            
-            
-        }
-        if(i==0){
-            unit.losPath.push(raycast.x,raycast.y); 
-            first.x = raycast.x;
-            first.y = raycast.y;
-            
-        }
-        
-            
-    }
-    unit.losPath.push(first.x,first.y,unit.x,unit.y);
-   
-}
-
+////////////////////////////////////////////////////////////////////////////////
+// The "starburst" visibility code lived here: ~280 lines across make_starburst,
+// make_starburst_with_modified_view and make_starburst_without_limit. It has been
+// switched off (`enableLOS = false`) for years, and could not simply have been
+// switched back on: its occluder corners were collected once at map load
+// (`setupLOS`), so a door opening or a wall coming down changed nothing; it
+// re-sorted and spliced that whole corner list on every frame; and the spyglass was
+// implemented by overwriting `unit.x`/`unit.y`, sweeping, then putting them back.
+//
+// Phase 4b replaces it with a proper angular sweep over live occluders:
+//   src/fog/occluders.ts   boundary edges of the vision-blocking cells, merged
+//   src/fog/visibility.ts  the sweep itself (pure, unit-tested)
+//   src/render/fog.ts      the cache, the mask texture, the per-frame draw
+////////////////////////////////////////////////////////////////////////////////
 
 function gameloop(deltaTime){
     //////////////////////
@@ -1659,8 +1354,8 @@ function gameloop(deltaTime){
     //Hero Movement and Aim
     //////////////////////
     
-    //get raycast for hero aim:
-    hero_end_aim_coord = getRaycastPoint(hero.x,hero.y,mouse.x,mouse.y);
+    //where the hero's aim runs into the world (physics raycast, §3.2)
+    hero_end_aim_coord = physics.sightStop(hero.x,hero.y,mouse.x,mouse.y);
     
     //update hero directions based on keys:
     if(keys.w){
@@ -1734,10 +1429,10 @@ function gameloop(deltaTime){
     }
     
     
-    //make_starburst_without_limit(hero);
     //SPYGLASS:
-    //The below section changes the hero LOS starburst to be source from
-    //a bit away from him so he can peak under doors and around corners
+    //The below section moves the hero's viewpoint a bit away from him so he can peek
+    //under doors and around corners. src/render/fog.ts sweeps from `spyglassPos`; the
+    //old code faked it by overwriting hero.x/hero.y for the duration of the sweep.
     spyglassPos = hero.getSpyglassPos();
     var spyglassInWall = grid.isWallSolidAndNotDoor_coords(spyglassPos.x,spyglassPos.y);
     if(grid.isWallDoor_coords(spyglassPos.x,spyglassPos.y))spyglassPos.inDoor = true;
@@ -1750,18 +1445,8 @@ function gameloop(deltaTime){
         hero.sprite_spyglass.visible = true;
     }
 
-    
-    make_starburst_with_modified_view(hero,spyglassPos.x,spyglassPos.y);
     //end spyglass
-    
-    for(var i = 0; i < security_cameras.length; i++){
-        var cam = security_cameras[i];
-        if(cam.hacked && cam.alive)make_starburst(cam,2*Math.PI/3);
 
-    }
-    
-
-    
     //////////////////////
     //update particles
     //////////////////////
@@ -1776,20 +1461,11 @@ function gameloop(deltaTime){
         hero.inOffLimits = false;
     }
     
-    //check collisions and prepare to draw walls:
+    //prepare to draw walls. The hero's collision check used to be in this loop — four
+    //corner pushouts plus a side test against every one of the 1600 cells, every single
+    //frame. Box2D's broadphase does it now (roadmap §3.2).
     for(var i = 0; i < grid.cells.length; i++){
-        var cell = grid.cells[i];
-        if(cell.solid){
-            hero.collide(cell.v2);
-            hero.collide(cell.v4);
-            hero.collide(cell.v6);
-            hero.collide(cell.v8);
-            hero.collide_with_wall_sides(cell);
-        }
-        
-        //draw:
-        //cell.draw();//debug
-        cell.prepare_for_draw();
+        grid.cells[i].prepare_for_draw();
     }
     if(hero.alive && !hero_drag_target){
         hero.target_rotate = mouse;
@@ -1799,8 +1475,7 @@ function gameloop(deltaTime){
     }else{
         hero.target_rotate = null;
     }
-    hero.prepare_for_draw();
-    
+
     bomb.prepare_for_draw();
     if(bomb.sprite.visible)bomb_radius_debug.draw_obj(bomb.x,bomb.y,bomb_radius);
     else bomb_radius_debug.graphics.clear();
@@ -1816,10 +1491,24 @@ function gameloop(deltaTime){
     hero_last_seen.prepare_for_draw();
     
     gameloop_guards(deltaTime);
-    
+
     if(notifyGuardsOfHeroLocation)console.log("Repath all guards to hero last seen");
     notifyGuardsOfHeroLocation = false;
-    
+
+    //////////////////////
+    //Physics
+    //////////////////////
+    //Everything above only ever *asked* for movement — the hero's keys and each guard's
+    //next waypoint became a velocity. This is where movement actually happens: one fixed
+    //step of the solver, then every body's position is written back onto the sprite that
+    //owns it. Wall sliding, guard separation and shoving all come out of this step.
+    physics.step(deltaTime);
+    physics.syncActors();
+
+    hero.prepare_for_draw();
+    for(var i = 0; i < guards.length; i++){
+        guards[i].prepare_for_draw();
+    }
 
     gameloop_security_cams(deltaTime);
     
@@ -1872,31 +1561,12 @@ function gameloop(deltaTime){
     updateCamera(deltaTime);
     //causing slowdown?
     if(debug_on)updateDebugInfo();
-    
-    
-    if(enableLOS){
-        //Update LOS:    
-        losPathGraphics.clear();
-        
-        losPathGraphics.beginFill(0xffffff);
-        losPathGraphics.drawPolygon([0,0,grid_width,0,grid_width,grid_height,0,grid_height,0,0]);
-        losPathGraphics.beginFill(0);
-        losPathGraphics.drawPolygon(hero.losPath);
-        
-        //clear out the LOS paths:
-        hero.losPath = [];
-        for(var i = 0; i < security_cameras.length; i++){
-            var sec_camera = security_cameras[i];
-            losPathGraphics.beginFill(0);
-            losPathGraphics.drawPolygon(sec_camera.losPath);
-            sec_camera.losPath = [];
-        }
 
-        
-        //reset the losSprite texture
-        losTexture.render(losPathGraphicsContainer, null, false);
-    }
+    //physics/fog debug overlay (fixtures, sensors, occluders), cycled with the B key
+    drawPhysicsDebug();
 
+    //The fog mask itself is redrawn once per *rendered* frame, from animate() — it is
+    //presentation, and there is nothing to gain from sweeping twice for one picture.
 }
 window.debug_info = document.getElementById('debug_info');
 function updateDebugInfo(){
@@ -1961,6 +1631,7 @@ function spawn_individual_backup(){
     var newGuard = new sprite_guard_wrapper(new PIXI.Sprite(img_guard_alert),hasRiotShield);
     newGuard.x = guard_backup_spawn.x;
     newGuard.y = guard_backup_spawn.y;
+    physics.addGuard(newGuard, newGuard.radius);
     //if(newGuard.alive)newGuard.becomeAlarmed();
     guards.push(newGuard);
 
@@ -2181,7 +1852,7 @@ function explodeBomb(){
                     if(grid.cells[w].image_number != 1 && grid.cells[w].image_number != 3 && grid.cells[w].image_number != 4)grid.cells[w].changeImage(1);
                 }
                 
-                if(grid.cells[w].solid)breachedCells.push(w);
+                if(grid.cells[w].solid || grid.cells[w].door)breachedCells.push(w);
                 grid.cells[w].solid = false;
                 grid.cells[w].blocks_vision = false;
                 grid.cells[w].door = false;
@@ -2190,6 +1861,18 @@ function explodeBomb(){
 
         }
     }
+    //A door whose cell has been blown away must stop opening and closing itself, or the
+    //next guard walking past would flip `solid`/`blocks_vision` back on and put a
+    //phantom wall in the middle of the hole. `broken` is the door's existing "kicked
+    //down" state and both open() and close() already honour it.
+    for(var ds = 0; ds < grid.door_sprites.length; ds++){
+        var door_sprite = grid.door_sprites[ds];
+        if(breachedCells.indexOf(door_sprite.relatedDoorWall.cellIndex()) !== -1){
+            door_sprite.open();
+            door_sprite.broken = true;
+        }
+    }
+    //nav re-derives walkability and physics drops the fixtures; both listen to this.
     if(breachedCells.length > 0)events.emit('nav:dirty', breachedCells);
     //a blast is a loud, dangerous thing to have happened here
     events.emit('nav:danger', {x: bomb.x, y: bomb.y, amount: 8, radius: 3});
@@ -2330,6 +2013,6 @@ function getMapInfo(subdir, fileName){
 // `window`. It is an ES module now, so the functions below are republished as
 // globals for the not-yet-extracted code that still reads them by bare name.
 // See src/legacy-bridge.ts. Each extraction deletes another line from here.
-Object.assign(window, { getColor, windowSetup, fullscreen, drawBloodTrail, bakeBloodTrail, getUrlVars, removeAllChildren, clearStage, startMenu, startGame, setup_map, animate, reactionTimeout, gameloop_guards, gameloop_security_cams, gameloop_bullets, gameloop_doors, gameloop_dragtarget, gameloop_messages_and_tooltip, gameloop_getawaycar_and_loot, gameloop_alert_animation, pickUpGunDrop, make_starburst, make_starburst_with_modified_view, make_starburst_without_limit, gameloop, updateDebugInfo, newMessage, newFloatingMessage, updateMessage, spawn_backup, spawn_individual_backup, alert_all_guards, unsilenced_gun, setHeroImage, useMask, hero_is_dead, doGunShotEffects, set_latestAlert, setBomb, gameloop_bomb, explodeBomb, plantBomb, drop_gun, killHero, getMapInfo });
+Object.assign(window, { getColor, windowSetup, fullscreen, drawBloodTrail, bakeBloodTrail, getUrlVars, removeAllChildren, clearStage, startMenu, startGame, setup_map, animate, reactionTimeout, gameloop_guards, gameloop_security_cams, removeBullet, gameloop_bullets, gameloop_doors, gameloop_dragtarget, gameloop_messages_and_tooltip, gameloop_getawaycar_and_loot, gameloop_alert_animation, pickUpGunDrop, gameloop, updateDebugInfo, newMessage, newFloatingMessage, updateMessage, spawn_backup, spawn_individual_backup, alert_all_guards, unsilenced_gun, setHeroImage, useMask, hero_is_dead, doGunShotEffects, set_latestAlert, setBomb, gameloop_bomb, explodeBomb, plantBomb, drop_gun, killHero, getMapInfo });
 
 export {};

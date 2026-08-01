@@ -136,66 +136,15 @@ function positionInCircle(circle,x,y){
     return angle;
 
 }
-////////////////////////////////////////////////////////////
-//////////////////////QUICK SORT for LOS///////////////////////////
-////////////////////////////////////////////////////////////
-function quickSort(items, left, right) {
-
-    var index;
-
-    if (items.length > 1) {
-
-        index = partition(items, left, right);
-
-        if (left < index - 1) {
-            quickSort(items, left, index - 1);
-        }
-
-        if (index < right) {
-            quickSort(items, index, right);
-        }
-
-    }
-
-    return items;
-}
-function partition(items, left, right) {
-
-    var pivot   = items[Math.floor((right + left) / 2)].angle,
-        i       = left,
-        j       = right;
-
-
-    while (i <= j) {
-
-        while (items[i].angle < pivot) {
-            i++;
-        }
-
-        while (items[j].angle > pivot) {
-            j--;
-        }
-
-        if (i <= j) {
-            swap(items, i, j);
-            i++;
-            j--;
-        }
-    }
-
-    return i;
-}
-function swap(items, firstIndex, secondIndex){
-    var temp = items[firstIndex];
-    items[firstIndex] = items[secondIndex];
-    items[secondIndex] = temp;
-}
+//The angle quicksort that lived here (`quickSort`/`partition`/`swap`) existed only to
+//order the starburst's LOS points. The starburst is gone (Phase 4b) and the replacement
+//sorts its own candidate angles with a plain comparator, so this went with it.
 
 // --- legacy global bridge ---------------------------------------------------
 // This file used to be a classic <script> whose top-level declarations landed on
 // `window`. It is an ES module now, so the functions below are republished as
 // globals for the not-yet-extracted code that still reads them by bare name.
 // See src/legacy-bridge.ts. Each extraction deletes another line from here.
-Object.assign(window, { circle_linesetment_intersect, Ray, get_distance, findAngleBetweenPoints, angleInArcRad, angleInArc, angle_between, positionInCircle, quickSort, partition, swap });
+Object.assign(window, { circle_linesetment_intersect, Ray, get_distance, findAngleBetweenPoints, angleInArcRad, angleInArc, angle_between, positionInCircle });
 
 export {};

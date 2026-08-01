@@ -137,46 +137,6 @@ describe('positionInCircle', () => {
   });
 });
 
-describe('quickSort', () => {
-  const byAngle = (xs: number[]) =>
-    quickSort(
-      xs.map((angle) => ({ angle })),
-      0,
-      xs.length - 1,
-    ).map((p: { angle: number }) => p.angle);
-
-  it('sorts LOS points by angle', () => {
-    expect(byAngle([3, 1, 2])).toEqual([1, 2, 3]);
-    expect(byAngle([5, 4, 3, 2, 1])).toEqual([1, 2, 3, 4, 5]);
-    expect(byAngle([-2.5, 0, 3.1, -0.4])).toEqual([-2.5, -0.4, 0, 3.1]);
-  });
-
-  it('keeps duplicates and handles already-sorted and single-element input', () => {
-    expect(byAngle([1, 1, 2, 2])).toEqual([1, 1, 2, 2]);
-    expect(byAngle([1, 2, 3])).toEqual([1, 2, 3]);
-    expect(byAngle([7])).toEqual([7]);
-  });
-
-  it('sorts a larger shuffled set', () => {
-    const input = Array.from({ length: 64 }, (_, i) => ((i * 37) % 64) - 32);
-    expect(byAngle(input)).toEqual([...input].sort((a, b) => a - b));
-  });
-
-  it('sorts in place and returns the same array', () => {
-    const items = [{ angle: 2 }, { angle: 1 }];
-    expect(quickSort(items, 0, 1)).toBe(items);
-    expect(items[0].angle).toBe(1);
-  });
-});
-
-describe('swap', () => {
-  it('exchanges two entries', () => {
-    const items = ['a', 'b', 'c'];
-    swap(items, 0, 2);
-    expect(items).toEqual(['c', 'b', 'a']);
-  });
-});
-
 describe('Ray', () => {
   it('holds a start and an end that can be reset in place', () => {
     const ray = new Ray(1, 2, 3, 4);

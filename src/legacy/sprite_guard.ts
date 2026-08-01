@@ -6,6 +6,7 @@ me at jdoleary@gmail.com
 import { gameClock } from '../core/clock';
 import { events } from '../core/events';
 import { nav, PathPriority } from '../nav';
+import { physics } from '../physics';
 function sprite_guard_wrapper(pixiSprite, hasRiotShield){
     function sprite_guard(hasRiotShield){
         this.path = [];//path applies to AI following a path;
@@ -36,6 +37,14 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         //asking for the next one instead of asking on the very next tick.
         this.patrolRetryAt = 0;//gameClock time (ms) before which getRandomPatrolPath() is a no-op
         this.patrolFailStreak = 0;//consecutive searches that returned no path, drives the backoff
+        //Stuck detection (Phase 4). Guards used to walk through walls and each other, so
+        //a waypoint was always eventually reached and `target` always cleared. Now they
+        //are solid bodies: two guards can wedge in a doorway, or a path can be blocked by
+        //a squadmate who stopped to shoot. Without this a wedged guard would hold its
+        //target forever and never ask for another route.
+        this.stuckSince = 0;//gameClock time the guard stopped making progress, 0 = moving
+        this.stuckFromX = 0;
+        this.stuckFromY = 0;
 
         //Add all sprites to sprite container
         this.feet_clip = jo_movie_clip("movie_clips/","feet_",8,".png")
@@ -51,10 +60,37 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         this.sprite_body.anchor.y = 0.5;
         spriteContainer.addChild(this.sprite_body);
         
+        //A guard who is on their way somewhere but has not actually moved for a while is
+        //jammed against geometry or a squadmate. Returns true once per jam; the caller
+        //drops the path so the guard asks nav for a new one.
+        var STUCK_GRACE_MS = 1500;
+        var STUCK_EPSILON_PX = 4;
+        this.checkStuck = function(){
+            if(!this.moving || this.path.length === 0 && this.target.x == null){
+                this.stuckSince = 0;
+                return false;
+            }
+            var moved = get_distance(this.x,this.y,this.stuckFromX,this.stuckFromY);
+            var now = gameClock.now();
+            if(moved > STUCK_EPSILON_PX || this.stuckSince === 0){
+                this.stuckFromX = this.x;
+                this.stuckFromY = this.y;
+                this.stuckSince = now;
+                return false;
+            }
+            if(now - this.stuckSince < STUCK_GRACE_MS)return false;
+            this.stuckSince = 0;
+            return true;
+        };
+
         this.kill = function(){
             //play_sound(sound_unit_die);
             this.sprite_body.texture = (img_guard_dead);
             this.alive = false;
+            //A corpse is a prop to be dragged, not an obstacle: drop the body out of the
+            //physics world so the drag code can move it directly and the living can walk
+            //over it, exactly as they did before Phase 4.
+            physics.removeActor(this);
             //enable moving so they can be dragged
             this.moving = true;
             this.path = [];

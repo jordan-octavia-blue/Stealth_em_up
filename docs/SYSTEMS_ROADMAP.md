@@ -23,7 +23,11 @@ Guiding constraints:
 > raw wall-clock AI timers) is fixed — fixed 60 Hz timestep plus the pausable
 > `GameClock`. **Post-Phase 3:** pathologies #1 and #2 are fixed — `src/nav/` replaced
 > the vendored A\* and its never-updated graph; the last item of #8 (the
-> `alarmingObjects` array) is Phase 6 work.
+> `alarmingObjects` array) is Phase 6 work. **Post-Phase 4:** #3 is fixed (planck.js:
+> the hero's 1600-cell loop, the O(n²) guard separation and the doors×guards loop are
+> gone, and guards collide with walls) and #7 is fixed (fog of war rebuilt and switched
+> back on). Of #5, only the vision *raycast* changed — range, hearing, memory and
+> de-escalation are still Phase 6.
 
 The game is plain ES5 loaded as 27 ordered `<script>` tags in `game.html`, sharing ~100
 globals. Pixi.js v3 is vendored in `bin/`. There is no npm, no bundler, no modules — the
@@ -721,7 +725,7 @@ Two real bugs the verification caught, both fixed: the overlay's path mode calle
 killed the gameloop; and `grid.angleBetweenPoints` was deleted with the shortcut code even
 though the blood-splatter paths still call it.
 
-### Phase 4 — Physics (planck.js) + 4b Fog-of-war (~2–3 weeks)
+### Phase 4 — Physics (planck.js) + 4b Fog-of-war (~2–3 weeks) ✅ done
 
 **4a:** world + bodies per §3; movement via velocities; bullets and AI vision become
 physics raycasts. Delete the brute-force hero collision, O(n²) separation, door proximity
@@ -731,6 +735,120 @@ AI-follow tuning.
 **Verify:** wall sliding feels at least as good as the hand-tuned pushout (budget feel
 time); bullets never tunnel at low FPS; guards can't be shoved through walls; fog polygon
 correct around doors as they open/close. Frame-time check.
+
+#### What shipped
+
+`src/physics/` — planck.js 1.5, strict TypeScript, no window globals, no Pixi:
+
+| File | What it owns |
+|---|---|
+| `constants.ts` | `PPM = 32` (a 64 px tile is 2 m), the collision categories, and the masks built from them. `VISION_BLOCKER` is deliberately a *separate bit* from `WALL`/`DOOR`, which is how one filtering vocabulary covers both "stops you walking" and "stops you seeing" — office furniture is `WALL` alone, a black wall is `WALL \| VISION_BLOCKER`. Phase 8's smoke grenade is already expressible: `VISION_BLOCKER` and nothing else. |
+| `world.ts` | The planck wrapper. One static body for the whole map with a 2 m box fixture per solid cell (476 on `bank_1`); door fixtures that toggle between solid+opaque and sensor+transparent, each with a proximity sensor beside it; dynamic `fixedRotation` circles for the hero and guards; filtered raycasts; deferred `destroyFixture` (Box2D forbids destroying mid-step); contact bookkeeping for the door sensors; and pixel-space geometry for the debug overlay, so planck's types stop at this file. |
+| `index.ts` | The `physics` facade: lifetime, the fixed step and the position write-back, `steerTowards` (the one place per-tick sprite speeds become Box2D's per-second velocities), and the four queries gameplay actually asks — `canSee`, `canSeeIgnoringDoors`, `sightStop`, `bulletHit`. |
+
+`src/fog/` and `src/render/fog.ts` — the 4b half:
+
+| File | What it owns |
+|---|---|
+| `fog/occluders.ts` | Vision-blocking boundary edges of the **live** grid, with collinear runs merged. On `bank_1` that is ~450 wall cells (1800 raw edges) down to ~160 segments. Everything outside the map counts as blocking, so border walls emit no outward face; the four map-boundary segments are appended so a sweep can never escape. |
+| `fog/visibility.ts` | The angular sweep: a ray either side of every corner in range, plus a sampled arc for the unobstructed edge, sorted once by angle and walked into a fan. Takes the viewpoint as an argument — the spyglass used to be implemented by overwriting `hero.x`/`hero.y` for the duration of the sweep and putting them back. |
+| `render/fog.ts` | The occluder cache and its invalidation, the mask `RenderTexture` pipeline, and the once-per-frame draw. |
+
+What changed outside those directories:
+
+- **Movement is a velocity.** `jo_sprite.move_to_target` sets one on sprites that own a
+  body and keeps the original direct-move path for everything else (bullets, corpses
+  being dragged, doors). **Deleted:** `collide` (four corner pushouts against every one of
+  the 1600 cells, every frame), `collide_with_wall_sides`, and `unit_to_unit_collide` —
+  along with the loop in `gameloop()` that drove the first two and the O(n²) loop in
+  `gameloop_guards` that drove the third. Guards collide with walls and with each other
+  for the first time.
+- **Vision and gunfire are raycasts.** `doesSpriteSeeSprite` keeps its cone and swaps the
+  grid-DDA raycaster for `physics.canSee`. `js/jo_raycast.ts` is **deleted** (232 lines) —
+  including its 40-step scan limit, past which it silently reported "no wall".
+- **Doors report their own contacts.** A sensor fixture per door replaces the
+  doors×guards nested proximity loop; the handful of bodies actually touching a door still
+  get the exact `radius * 4` test, so the rule is unchanged. `jo_wall.openDoor/closeDoor`
+  is now the single place where a door's state reaches all three consumers: grid flags,
+  physics fixture, fog cache.
+- **The bomb reaches physics for free.** It already emitted the geometry-change event for
+  nav; `physics` listens to the same one and drops the fixtures, so a breach is walkable,
+  shootable and see-through in the same step.
+- **A stuck detector for guards** (`sprite_guard.checkStuck`). New, and needed: guards used
+  to walk through walls and each other, so "heading for a waypoint" and "getting there"
+  were the same thing. A guard that holds a route without moving for 1.5 s now drops it and
+  asks nav for another.
+- **The starburst is gone** — 279 lines across `make_starburst`,
+  `make_starburst_with_modified_view` and `make_starburst_without_limit`, plus both
+  `setupLOS()` implementations (hero and security camera) and the angle `quickSort` in
+  `jo_utility` that existed only to order its points. `enableLOS` is `true`.
+- **Debug overlay on `B`**, cycling off → fixtures → occluders → visibility polygon
+  (`src/systems/physics_debug.ts`), alongside `N`'s nav overlay.
+
+#### Five deliberate deviations from §3 and §8.1
+
+| | |
+|---|---|
+| **Bullets stayed projectiles.** §3.2 called for hitscan with the tracer as pure VFX. Guard accuracy decays to a perfect 0 px after five shots and the hero has one hit point, so hitscan would mean *unavoidable* death once any guard has fired a magazine — a playability regression, and every phase is supposed to end playable. Instead each bullet's swept segment is resolved by one `world.rayCast` per step. That still deletes the DDA raycast at spawn and the per-bullet loop over every guard doing circle-vs-segment maths, and it shares filtering with vision, which was the point. |
+| **Doors are fixtures on the map body, not kinematic bodies.** They never actually move — the sprite rotates, the cell toggles. A kinematic body would buy nothing and cost a body per door. |
+| **Vision range is still unlimited for the AI.** §5.2's ~450 px cap, the awareness meter and hearing are Phase 6. What Phase 4 adds is the *fog's* 900 px radius, and a matching range check on the guard-visibility code, so a guard is never drawn in a region the mask is painting dark. |
+| **The geometry-change event is still called `nav:dirty`.** Physics and fog subscribe to it too. Renaming it is part of Phase 5's `damageCell` pipeline (§6.2), which replaces it with ordered `cell:destroyed` listeners; doing it now would have been churn for the same behaviour. |
+| **Fog is swept once per rendered frame, not per fixed step.** It is presentation: at 30 FPS there is nothing to gain from sweeping twice for one picture, and it has to keep running while paused or the screen goes stale. |
+
+#### Four real bugs, three of them found while verifying
+
+| | |
+|---|---|
+| **Bullets stopped a hair short of their own victim.** The first cut aimed each shot with a mask that included people, so `bullet.target` landed on the *near edge of the guard being shot at* — the bullet then decelerated into its target and was cleaned up as a wall hit without ever testing a segment that contained the guard. Aiming targets geometry (`sightStop`); who is hit is resolved per step by `bulletHit`. | `jo_gun.ts`, `main.ts` |
+| **The last few pixels of a shot were never tested.** `move_to_target` stops short rather than overshooting, so on a bullet's final step it does not move at all and the swept segment was zero-length. Anyone standing in that last sub-75 px gap was immune. The final stretch to the target is now included. | `gameloop_bullets` |
+| **Backup guards spawned without a body.** Only the guards placed at map load were given one, so the seven police who arrive after the alarm walked through walls and each other. Found by the frame-time harness, which spawns them. | `spawn_individual_backup` |
+| **A bombed door re-solidified itself.** `closeDoor()` sets `solid`/`blocks_vision` back to true, so the next guard to walk past a doorway that had just been blown open put a phantom wall in the middle of the hole — invisible before Phase 4, very visible now that the fog draws from the same flags. Breached door cells are marked `broken`, which both `open()` and `close()` already honour. | `explodeBomb` |
+
+#### Phase 4 verification
+
+**Vitest: 33 new cases** (200 total, all green) — 18 over the physics world (fixture counts,
+nearest-hit raycasts, furniture that stops movement but not sight, the shooter being
+ignored, sensors never stopping a ray, doors blocking and unblocking both movement and
+sight, a body stopped by a wall, sliding along one without losing speed, two bodies
+separating, a removed body going still, teleports, and the breach test: a cleared cell
+stops blocking movement *and* sight) and 15 over the fog (edge extraction and run merging,
+out-of-map treated as blocking, shadows behind a wall, seeing through a hole that opens,
+the radius clip, cone limiting, a door closing and opening, and a vertex-count bound so
+the polygon stays cheap to redraw).
+
+**Headless Playwright** (software rendering) against the production build, same scenario as
+the Phase 3 note: `bank_1`, 20 guards, squad alarmed, a "repath to the hero" pulse every
+second for 10 s. Per-fixed-step `gameloop()` cost, two runs each:
+
+| | per fixed step | frame bracket p50 | max | FPS (headless) |
+|---|---|---|---|---|
+| Phase 3 | 0.41 / 0.42 ms | 1.6 / 1.8 ms | 4.3 / 8.7 ms | 14.2 / 13.0 |
+| Phase 4 | 0.62 / 0.67 ms | 4.9 / 5.2 ms | 10.8 / 11.8 ms | 7.7 / 7.6 |
+| Phase 4, fog render off | 0.72 ms | 3.0 ms | 8.6 ms | 13.5 |
+
+Two things worth reading carefully. The simulation costs about **+0.2 ms per fixed step** —
+that is the solver carrying 20 dynamic bodies against 476 static fixtures, and it is the
+price of deleting three brute-force loops and getting guard-vs-wall collision that never
+existed. The **halved framerate is the fog's render pass, not the simulation**: switching
+only the mask render off restores 13.5 FPS. That pass is a 2560×2560 `RenderTexture`
+redrawn every frame, which SwiftShader rasterises on the CPU; the sweep *maths* is
+**0.068 ms** for a 127-vertex polygon. On a real GPU this is a full-screen blit. Worth
+re-checking on hardware during the Phase 5 playtest.
+
+**Smoke harness**, now checked in at `tools/smoke.mjs` (§10.1 automated; not in CI, it
+needs a browser): 32 assertions against the production build, all passing on three
+consecutive runs. Map and physics build with one fixture per solid cell; WASD moves the
+hero and two seconds of driving into geometry never puts him inside it; all guards patrol
+and none ends up in a wall; a door opens on sensor contact, stops blocking sight, then
+closes and blocks again; a shot kills a guard, drops their gun and takes their body out of
+the world; the bomb removes fixtures and the hole is walkable to nav *and* see-through
+(the marquee Phase 5 test, passing early for both nav and vision); a corpse can be grabbed
+and dragged; the loot can be picked up and delivered to the van; `Esc` drops the physics
+world and starting again rebuilds it with guards patrolling; and after 30 s of an alarmed
+squad fighting in corridors, no guard is wedged and none is inside a wall.
+
+A human playthrough is still worth doing for *feel* — wall sliding, whether the fog reads
+well at the default zoom — which the automated pass says nothing about.
 
 ### Phase 5 — Destructible walls (~1 week)
 
@@ -801,6 +919,17 @@ If motivation needs a fun win early, pull Phase 7 forward to right after Phase 4
    - [ ] Press `N` — the nav overlay cycles paths / regions / danger / flow field and back
          off, and the guard paths drawn match where they actually walk. (Added in Phase 3;
          it is also the fastest way to see a bug in a later phase's nav changes.)
+   - [ ] Press `B` — the physics overlay cycles fixtures / occluders / visibility polygon
+         and back off. Fixtures should trace the walls exactly, doors should go hollow when
+         they open, and the polygon should match the lit part of the screen. (Added in
+         Phase 4.)
+   - [ ] Fog: the map beyond line of sight is shaded, corners cast shadows that move as you
+         do, opening a door reveals what is behind it, and bombing a wall reveals what is
+         behind *that*. Guards are only drawn where you can actually see them.
+
+   Steps 1–10 of this checklist are automated in `tools/smoke.mjs` (Playwright, run
+   against `vite preview`). It is not in CI — it needs a browser — but it is the cheapest
+   way to find out whether a change broke something structural before playing for feel.
 
    Phase 0 note: the checklist above was verified headlessly (Playwright driving Chromium),
    including guard patrol, camera swivel, blood trail, and the full bomb/pause/blast path.

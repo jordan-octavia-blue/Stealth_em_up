@@ -13,6 +13,8 @@ import { gameClock } from '../core/clock';
 import { events } from '../core/events';
 import { ejectShell } from './particles';
 import { cycleNavDebug } from './nav_debug';
+import { cyclePhysicsDebug } from './physics_debug';
+import { physics } from '../physics';
 
 export function mouseMove(e){
     //Viewport coords, not document coords: camera.getMouse wants the position within the
@@ -89,6 +91,13 @@ export function addKeyHandlers(){
                     newMessage('Nav overlay: ' + cycleNavDebug());
                 }
                 keys['n'] = true;
+            }
+            if(code == 66){
+                //key b: cycle the physics/fog overlay (off / fixtures / occluders / polygon)
+                if(!keys['b']){
+                    newMessage('Physics overlay: ' + cyclePhysicsDebug());
+                }
+                keys['b'] = true;
             }
             if(code == 70){
                 //plant bomb
@@ -192,6 +201,10 @@ export function addKeyHandlers(){
                                     guard.path = [];
                                     guard.target = {x: null, y:null};
                                     guard.being_choked_out = true;
+                                    //a guard being choked out is dragged directly, like a
+                                    //corpse — take the body out of the world so the solver
+                                    //isn't fighting the drag
+                                    physics.removeActor(guard);
                                     //slow down hero speed because he just started dragging something.
                                     hero.speed = hero.speed_walk/2;
                                     hero_drag_target = guard;
@@ -265,6 +278,7 @@ export function addKeyHandlers(){
         if(code == 71){keys['g'] = false;}
         if(code == 82){keys['r'] = false;}
         if(code == 78){keys['n'] = false;}
+        if(code == 66){keys['b'] = false;}
         if(code == 86){
             //on release of key only
             //if(keys['v'])circProgBar.stop();//stop putting on mask
