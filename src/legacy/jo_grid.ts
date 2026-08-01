@@ -1,3 +1,5 @@
+import { events } from '../core/events';
+
 //NOTE: to be batched, I think all images in spritebatch have to be the same sprite:
 window.tile_container_black ??= undefined;
 window.tile_container_white ??= undefined;
@@ -164,14 +166,18 @@ function jo_grid(map){
         var cell = this.getCellFromIndex(grid_index.x,grid_index.y);
         
         if(cell){
-            
+
             cell.solid = true;
             cell.blocks_vision = true;
-            
+            //nav derives walkability from these flags, so it has to hear about the change
+            //(this runs after nav.build(): the van and the security computer seal the
+            //ground under themselves once they are placed).
+            events.emit('nav:dirty', {index: this.get1DIndexFrom2DIndex(grid_index.x,grid_index.y), walkable: false});
+
         }else{
             //console.log('error');
         }
-        
+
     }
 
     this.isTileRestricted_coords = function(x,y){
@@ -210,33 +216,12 @@ function jo_grid(map){
         }
     
     };
-    //used for random patrol paths:
-    this.getRandomNonSolidCellIndex = function(){
-    
-        var cell;
-        var randomCellIndex;
-        do{
-            //random number between                           max           and  min
-            randomCellIndex = Math.floor(Math.random() * this.cells.length) + 0;
-            cell = this.cells[randomCellIndex];
-        
-        }while(cell.solid);
-        return randomCellIndex;
-    
-    }
-    this.getRandomNonSolid_NonRestricted_CellIndex = function(){
-        //for civilian wander
-        var cell;
-        var randomCellIndex;
-        do{
-            //random number between                           max           and  min
-            randomCellIndex = Math.floor(Math.random() * this.cells.length) + 0;
-            cell = this.cells[randomCellIndex];
-        
-        }while(cell.solid || cell.restricted);
-        return randomCellIndex;
-    
-    }
+    //Patrol destinations used to be sampled from anywhere on the map with a
+    //rejection loop (`getRandomNonSolidCellIndex`), which is how a guard ended up
+    //asking for a cell inside a sealed room and re-running a full A* every frame
+    //forever. `nav.randomDestinationNear` samples the requester's own connected
+    //region instead, so every destination is reachable by construction (§4).
+
      //private
     this.make_door = function(door, horizontal){
             this.doors.push(door);
@@ -293,119 +278,29 @@ function jo_grid(map){
         };
     }
     delete this.map_data;
-    
-    /////////////////////////////
-    ////////////A STAR///////////
-    /////////////////////////////
-    
-    this.cells_astar = [];//astar.js requires an actual 2d array so this variable will be made from cells as a 2D array
-    //the below for loop turns this.cells into a 2d array and puts it in this.cells_astar
-    for(var i = 0; i < this.height; i++){
-        var slice = this.cells.slice(i*this.width,i*this.width+this.width);
-        for(var j = 0; j < slice.length; j++){
-            //convert tile codes into 0 for wall and 1 for floor:
-            if(slice[j].solid && !slice[j].door){
-                //Note: doors can be walked through by guards
-                slice[j] = 0;
-            }else{
-                slice[j] = 1;
-            }
-        }
-        //console.log('map ' , i , ' ' , slice);
-        this.cells_astar.push(slice);
-    }
-    this.cells_astar = new Graph(this.cells_astar);//convert to astar graph
-    
-    
-    this.reducePathWithShortcut = function(path,radius){
-        //checks if there are any angled shortcuts along this path:
-        var startPoint = path[0];
-        //magic number 3 is set to reduce the amount of times that guards walk through the corners of walls.
-        if(path.length <= 1)return path;
-        var lastPointIndex;
-        for(var i = 1; i < path.length; i++){
-            //ignore vertical and horizontal shortcuts
-            if(startPoint.x == path[i].x || startPoint.y == path[i].y)continue;
-            if(this.isShortcutOK(startPoint,path[i],radius)){
-                lastPointIndex = i;
-                //console.log("lastPointIndex: " + i);
-            }else break;
-        
-        }
-        //if lastpoint is found, splice up until that point:
-        if(lastPointIndex != undefined){
-            path.splice(1,lastPointIndex-1);
-        }
 
-    }
-    this.getPath = function(start,end){
-        //start/end in format {x: #,y: #} # representing cell indices.
-        //because of how I read 2d arrays I have to treat all the y's as x's and all the x's as y's in the astar lib
-        //                      y   x
-        var start = this.cells_astar.nodes[start.y][start.x];//remember x and y are switched for the astar lib
-        var end = this.cells_astar.nodes[end.y][end.x];//remember x and y are switched for the astar lib
-        var result = astar.search(this.cells_astar.nodes, start, end);
-        var path = [];
-        for(var i = 0; i < result.length; i++){
-            path.push({x: result[i].y*this.cell_size+this.cell_size/2, y: result[i].x*this.cell_size+this.cell_size/2});//return path in obj pixel location, index*64-32 will center the pixel on the correct index cell
-            //console.log(result[i].y , ',' , result[i].x);
-        }
-        
-        
-        
-        
-        //console.log('grid return path: ');
-        //console.log(path);
-        return path; //path is an array of points
-    
-    };
-    
-    /*
-    The following functions are all to resolve if a path can take a shortcut.
-    At first I tested if a line between the mover and a list of next points intersects any walls.
-    Now im testing if the line between the point at the mover's normal vector of its direction with a magnitude of the movers
-    radius intersects any walls.  I do this for both sides of the bounds circle
-    */
+    ////////////////////////////////////////////////////////////////////////////
+    // Pathfinding lives in src/nav/ (roadmap §4).
+    //
+    // This file used to own an A* graph built once from the cell flags and never
+    // updated again — which is why a wall the bomb blew open stayed impassable to
+    // guards for the rest of the run. `nav` derives its layers from these same flags
+    // at build time and is told about changes through the `nav:dirty` event, so a
+    // breach is pathable immediately. The shortcut/string-pulling code moved to
+    // src/nav/smooth.ts, where it is unit-tested against the grid flags instead of
+    // the 40-step DDA raycaster.
+    ////////////////////////////////////////////////////////////////////////////
+
+    //Pure math, no grid state — it only lives on the grid for historical reasons. The
+    //shortcut code that used to be its main caller is gone; the blood-splatter code in
+    //main.ts and sprite_hero.ts still uses it.
     this.angleBetweenPoints = function (ax,ay,bx,by){
         //in radians
         var deltaY = by - ay;
         var deltaX = bx - ax;
         return Math.atan2(deltaY,deltaX);
     }
-    this.getPointOnCirlceAtAngle = function (cx,cy,radius,angle){
-        //angle in radians
-        var x = cx + radius * Math.cos(angle);
-        var y = cy + radius * Math.sin(angle);
-        return {x:x,y:y};
-    
-    }
-    this.isShortcutOK = function(startPoint,endPoint,radius){
-    
-        //this.debugbounds.draw_obj(startPoint.x,startPoint.y,radius);
-        
-        var newPoint = this.getPointOnCirlceAtAngle(startPoint.x,startPoint.y,radius,this.angleBetweenPoints(endPoint.x,endPoint.y,startPoint.x,startPoint.y)+(Math.PI/2));
-        var difX = newPoint.x - startPoint.x;
-        var difY = newPoint.y - startPoint.y;
-        
-        var newPoint2 = this.getPointOnCirlceAtAngle(startPoint.x,startPoint.y,radius,this.angleBetweenPoints(endPoint.x,endPoint.y,startPoint.x,startPoint.y)-(Math.PI/2));
-        var difX2 = newPoint2.x - startPoint.x;
-        var difY2 = newPoint2.y - startPoint.y;
-        
-        if(isLineOKForPath(endPoint.x+difX2,endPoint.y+difY2,newPoint2.x,newPoint2.y) && isLineOKForPath(endPoint.x+difX,endPoint.y+difY,newPoint.x,newPoint.y)){
-            /*this.debug3.color = 0x00ff00;
-            this.debug4.color = 0x00ff00;
-            this.debug3.draw_obj(endPoint.x+difX,endPoint.y+difY,newPoint.x,newPoint.y);
-            this.debug4.draw_obj(endPoint.x+difX2,endPoint.y+difY2,newPoint2.x,newPoint2.y);*/
-            return true;
-        
-        }else{
-            /*this.debug3.color = 0xff0000;
-            this.debug4.color = 0xff0000;
-            this.debug3.draw_obj(endPoint.x+difX,endPoint.y+difY,newPoint.x,newPoint.y);
-            this.debug4.draw_obj(endPoint.x+difX2,endPoint.y+difY2,newPoint2.x,newPoint2.y);*/
-            return false;  
-        }
-    }
+
     this.setImagesForTiles = function(){
         for(var i = 0; i < this.cells.length; i++){
             //set the tile image:

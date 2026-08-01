@@ -216,86 +216,17 @@ function getRaycastPointIgnoreDoor(startx,starty,endx,endy){
         return {x:ray_closest.x,y:ray_closest.y};
         
 }
-function isLineOKForPath(startx,starty,endx,endy){
-    //NOTE: below code is copied from getRaycastPoint with small changes:
-    //currently this is acutally used for pathing to allow AI to walk diagonally.
-
-    //sets the point at which the hero's aim runs into a solid wall
-        var ray_angle = findAngleBetweenPoints({x:startx,y:starty},{x:endx,y:endy});
-        //get the first point on the horizontal lines
-        var rayh = raycast_horiz({x:startx,y:starty},ray_angle);
-        var ray_h_closest;
-        
-        //find the closest point that touches a wall
-        for(var i = 0; i < 40; i++){
-            var nextPoint_h = nextPointAlongRay(rayh,i);
-            
-            if(grid.isWallPathBlocking_coords(nextPoint_h.x,nextPoint_h.y)){
-                ray_h_closest = nextPoint_h;
-                break; // [i] is the end of the raycast
-            }
-     
-        }
-        //get the first point on the vertical lines
-        var rayv = raycast_virt({x:startx,y:starty},ray_angle);
-        var ray_v_closest;
-        
-        
-        //find the closest point that touches a wall
-        for(var i = 0; i < 40; i++){
-            var nextPoint_v = nextPointAlongRay(rayv,i);
-            
-            if(grid.isWallPathBlocking_coords(nextPoint_v.x,nextPoint_v.y)){
-                ray_v_closest = nextPoint_v;
-                break; // [i] is the end of the raycast
-            }
-     
-        }
-        
-        //find closest out of the two closest points:
-        var ray_closest;
-        //if one of the rays doesn't exist
-        if(!ray_h_closest && ray_v_closest){
-            ray_closest = ray_v_closest;
-            
-        }else if(!ray_v_closest && ray_h_closest){
-            ray_closest = ray_h_closest;
-            
-        }else if (ray_h_closest && ray_v_closest){
-            //if both rays contain a close point touching a wall, pick the closest.
-            var h_dist = get_distance(startx,starty,ray_h_closest.x,ray_h_closest.y);
-            var v_dist = get_distance(startx,starty,ray_v_closest.x,ray_v_closest.y);
-            if(h_dist < v_dist){
-                ray_closest = ray_h_closest;
-            }else{
-                ray_closest = ray_v_closest;
-            }
-        }else if(!ray_v_closest && !ray_h_closest){
-            console.log('ray out of range, try increasing the value of i if you wish to raycast further.'  + " ," +  startx  + " ," +  starty  + " ," +  endx  + " ," +  endy);
-            //returns endx,endy so as to not cause errors in all the places that use this function if the ray is null
-            //it returns the end point of the linesegment passed in, having detected no walls.
-            
-            ray_closest = {x: endx, y: endy};
-        }
-        //ray_debug.x = ray_closest.x;
-        //ray_debug.y = ray_closest.y;
-        //ray_debug.prepare_for_draw();
-        
-        var ray = {x:ray_closest.x,y:ray_closest.y};
-        
-        
-        if(get_distance(startx,starty,endx,endy)<=get_distance(startx,starty,ray.x,ray.y)){
-            return true;
-        }else{
-            return false;
-        }
-}
+// `isLineOKForPath` lived here: a copy of getRaycastPoint used only by
+// jo_grid's path-shortcut test. Phase 3 moved string pulling into
+// src/nav/smooth.ts, which checks the grid flags directly, so it had no
+// callers left. The rest of this file goes in Phase 4, when vision and
+// bullets become physics raycasts.
 
 // --- legacy global bridge ---------------------------------------------------
 // This file used to be a classic <script> whose top-level declarations landed on
 // `window`. It is an ES module now, so the functions below are republished as
 // globals for the not-yet-extracted code that still reads them by bare name.
 // See src/legacy-bridge.ts. Each extraction deletes another line from here.
-Object.assign(window, { raycast_horiz, nextPointAlongRay, raycast_virt, lineOfSightIgnoreDoor, lineOfSight, getRaycastPoint, getRaycastPointIgnoreDoor, isLineOKForPath });
+Object.assign(window, { raycast_horiz, nextPointAlongRay, raycast_virt, lineOfSightIgnoreDoor, lineOfSight, getRaycastPoint, getRaycastPointIgnoreDoor });
 
 export {};

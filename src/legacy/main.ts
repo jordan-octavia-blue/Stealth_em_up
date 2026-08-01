@@ -8,6 +8,8 @@ import { events } from '../core/events';
 import { mouseMove, addKeyHandlers, removeHandlers } from '../systems/input';
 import { updateCamera } from '../systems/camera';
 import { updateParticles, shardParticleSplatter, bloodParticleSplatter, ejectShell } from '../systems/particles';
+import { nav } from '../nav';
+import { drawNavDebug, resetNavDebug } from '../systems/nav_debug';
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 /*
@@ -342,6 +344,11 @@ function clearStage(){
     //removeHandlers:
     console.log('clear stage');
     removeHandlers();
+    //drop nav state with the run it belongs to: queued path requests hold references to
+    //guards from the game being torn down, and the debug overlay's Graphics is about to
+    //be removed with its container.
+    nav.reset();
+    resetNavDebug();
     //remove all children:
     removeAllChildren(display_tiles);
     removeAllChildren(display_blood);
@@ -389,7 +396,7 @@ function startGame(){
     step_accumulator = 0;
 
     //initialize variables:
-    keys = {w: false, a: false, s: false, d: false, r: false, f: false, v: false, g:false, space:false, shift:false, LMB:false, RMB:false};
+    keys = {w: false, a: false, s: false, d: false, r: false, f: false, v: false, g:false, n:false, space:false, shift:false, LMB:false, RMB:false};
     stage_child = new PIXI.Container();//replaces stage for scaling
     stage.addChild(stage_child);
     
@@ -559,7 +566,13 @@ function setup_map(map){
     //grid/map
     grid = new jo_grid(map);
     grid.setImagesForTiles();
-    
+
+    //Navigation layers (roadmap §4). Built before anything asks for a path — guards
+    //request their first patrol route the moment they are constructed, below. Later
+    //changes to cell solidity (the van sealing the ground under itself, the bomb
+    //opening a wall) reach nav through the `nav:dirty` event.
+    nav.build(grid);
+
     
     //whole map width and height:
     grid_width = grid.width*grid.cell_size;
@@ -883,7 +896,9 @@ function gameloop_guards(deltaTime){
             if(guard.path.length > 0){
                 //if guard does not have a target:
                 if(guard.target.x == null || guard.target.y == null){
-                    grid.reducePathWithShortcut(guard.path,guard.radius);
+                    //no shortcut pass here any more: nav string-pulls the whole path
+                    //once, when it is produced (src/nav/smooth.ts), instead of
+                    //re-running a raycast reduction every time a waypoint is consumed.
                     guard.target = guard.path.shift();//get the first element.
                 }
                 
@@ -1629,6 +1644,13 @@ function gameloop(deltaTime){
     gameClock.update(deltaTime);
 
     //////////////////////
+    //navigation: decay the danger layer and run queued path searches under the
+    //per-frame budget (roadmap §4). Runs before the guards so a path that came in
+    //this step is walked this step.
+    //////////////////////
+    nav.update(deltaTime);
+
+    //////////////////////
     //update Mouse
     //////////////////////
     if(mouse_relative.x != -10000)mouse = camera.getMouse(mouse_relative);//only set mouse position if the mouse is on the stage
@@ -1812,7 +1834,10 @@ function gameloop(deltaTime){
     gameloop_doors(deltaTime);
     
     gameloop_dragtarget(deltaTime);
-    
+
+    //nav debug overlay (paths / regions / danger / flow field), cycled with the N key
+    drawNavDebug();
+
     gameloop_messages_and_tooltip(deltaTime);
     
     for(var i = 0; i < doodads.length; i++){
@@ -2060,6 +2085,10 @@ function doGunShotEffects(unit, silenced){
     else{
         play_sound_many(sound_gun_shots);
     }
+    //A small danger deposit where the shooting is happening. It decays in seconds, so
+    //this nudges paths away from an active firefight without permanently scarring the
+    //map. (Phase 6 turns the same event into a hearing stimulus.)
+    events.emit('nav:danger', {x: unit.x, y: unit.y, amount: silenced ? 0.5 : 1.5, radius: 1});
 }
 
 //show alert icon
@@ -2129,6 +2158,11 @@ function explodeBomb(){
         notifyGuardsOfHeroLocation = true;
     
     //destroy nearby walls:
+    //Cells that stop being solid are collected and handed to nav in one batch, so a
+    //blown-open wall is pathable immediately (roadmap pathology #2 — the old A* graph
+    //was built once at setup and never updated, so guards treated a breach as a wall
+    //for the rest of the run). Phase 5 replaces this block with grid.damageCell().
+    var breachedCells = [];
     for(var w = 0; w < grid.cells.length; w++){
         if(get_distance(bomb.x,bomb.y,grid.cells[w].x,grid.cells[w].y) < bomb_radius){
             var wallInfo = grid.getInfoFromIndex(w);
@@ -2147,15 +2181,19 @@ function explodeBomb(){
                     if(grid.cells[w].image_number != 1 && grid.cells[w].image_number != 3 && grid.cells[w].image_number != 4)grid.cells[w].changeImage(1);
                 }
                 
+                if(grid.cells[w].solid)breachedCells.push(w);
                 grid.cells[w].solid = false;
                 grid.cells[w].blocks_vision = false;
                 grid.cells[w].door = false;
-            
+
             }
-        
+
         }
     }
-    
+    if(breachedCells.length > 0)events.emit('nav:dirty', breachedCells);
+    //a blast is a loud, dangerous thing to have happened here
+    events.emit('nav:danger', {x: bomb.x, y: bomb.y, amount: 8, radius: 3});
+
     //see if it kills anyone:
     for(var g = 0; g < guards.length; g++){
         var guard = guards[g];

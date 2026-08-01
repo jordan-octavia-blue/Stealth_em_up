@@ -12,6 +12,7 @@
 import { gameClock } from '../core/clock';
 import { events } from '../core/events';
 import { ejectShell } from './particles';
+import { cycleNavDebug } from './nav_debug';
 
 export function mouseMove(e){
     //Viewport coords, not document coords: camera.getMouse wants the position within the
@@ -81,6 +82,13 @@ export function addKeyHandlers(){
             if(code == 82){
                 keys['r'] = true;
                 hero.reload();
+            }
+            if(code == 78){
+                //key n: cycle the nav debug overlay (off / paths / regions / danger / flow)
+                if(!keys['n']){
+                    newMessage('Nav overlay: ' + cycleNavDebug());
+                }
+                keys['n'] = true;
             }
             if(code == 70){
                 //plant bomb
@@ -256,6 +264,7 @@ export function addKeyHandlers(){
         if(code == 70){keys['f'] = false;}
         if(code == 71){keys['g'] = false;}
         if(code == 82){keys['r'] = false;}
+        if(code == 78){keys['n'] = false;}
         if(code == 86){
             //on release of key only
             //if(keys['v'])circProgBar.stop();//stop putting on mask
