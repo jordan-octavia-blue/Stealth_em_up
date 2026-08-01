@@ -4,6 +4,8 @@ If you would like to copy or use my code, you may contact
 me at jdoleary@gmail.com
 /*******************************************************/
 import { gameClock } from '../core/clock';
+import { events } from '../core/events';
+import { nav, PathPriority } from '../nav';
 function sprite_guard_wrapper(pixiSprite, hasRiotShield){
     function sprite_guard(hasRiotShield){
         this.path = [];//path applies to AI following a path;
@@ -27,8 +29,11 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         this.hasRiotShield = hasRiotShield;
         this.reactionTimeMillis = 500;
         //Patrol repath throttling.
-        //Without this, a guard with an empty path runs a full A* every single frame, and a
-        //destination inside a sealed room (which never yields a path) makes that loop forever.
+        //Phase 3 moved the real fix into src/nav: destinations are sampled from this
+        //guard's own connected region (so they are always reachable) and searches run
+        //through the nav scheduler under a per-frame budget. This throttle survives as
+        //the pacing knob — a guard that just finished a patrol leg waits a beat before
+        //asking for the next one instead of asking on the very next tick.
         this.patrolRetryAt = 0;//gameClock time (ms) before which getRandomPatrolPath() is a no-op
         this.patrolFailStreak = 0;//consecutive searches that returned no path, drives the backoff
 
@@ -53,7 +58,14 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
             //enable moving so they can be dragged
             this.moving = true;
             this.path = [];
-            this.target = {x: null, y:null};                    
+            this.target = {x: null, y:null};
+            //a dead guard has no use for the path he asked for
+            nav.cancelRequest(this);
+            //Wherever guards die is dangerous: the nav danger layer decays over ~8s and
+            //is summed into path costs, so the squad stops filing into the same doorway
+            //one at a time. Phase 6's squad logic scales these deposits by what each
+            //guard actually witnessed.
+            events.emit('nav:danger', {x: this.x, y: this.y, amount: 6, radius: 2});
             alarmingObjects.push(this);//add body to alarming objects so if it is see they will sound alarm
             
             
@@ -71,41 +83,53 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         
         //minimum gap between two patrol searches for one guard, even when they succeed
         var PATROL_MIN_INTERVAL_MS = 250;
-        //backoff after a search that found no path: 250, 500, 1000, 2000, capped at 3000
+        //backoff after a request that came back with no path: 250, 500, 1000, 2000,
+        //capped at 3000. Region sampling makes this nearly unreachable now (a guard
+        //sealed alone in a cupboard is the remaining case), but it costs nothing.
         var PATROL_BACKOFF_BASE_MS = 250;
         var PATROL_BACKOFF_MAX_MS = 3000;
 
         this.getRandomPatrolPath = function(){
-            //finds a path to patrol
+            //queue a patrol path. The search itself runs inside nav, under the
+            //scheduler's per-frame budget — this call never performs one.
 
             //game time, not wall time: the backoff must not burn down while paused
             var now = gameClock.now();
-            //throttled: too soon since the last search (or still backing off from a failure)
+            //throttled: too soon since the last request (or still backing off)
             if(now < this.patrolRetryAt)return;
+            //already waiting on one; re-asking would just cancel and re-queue it
+            if(nav.hasPendingRequest(this))return;
 
-            //if the sprite is able to move
             if(this.moving){
-                //find new patrol path:
-                var newCellToPatrolTo = grid.getRandomNonSolidCellIndex();
-                var newCellInfo = grid.getInfoFromIndex(newCellToPatrolTo);
-                var newCellIndex = {x: newCellInfo.x_index, y: newCellInfo.y_index};
-                var currentIndex = grid.getIndexFromCoords_2d(this.x,this.y);
-                this.path = grid.getPath(currentIndex,newCellIndex);
-                //note: if a path is not found and this.path == [], the guard will idle again.
-
-                if(this.path.length > 0){
-                    //found one, drop the backoff
-                    this.patrolFailStreak = 0;
-                    this.patrolRetryAt = now + PATROL_MIN_INTERVAL_MS;
-                }else{
-                    //the destination was unreachable (sealed room, or the guard is boxed in).
-                    //back off exponentially so we don't burn a full A* per frame retrying.
-                    this.patrolFailStreak++;
-                    var backoff = PATROL_BACKOFF_BASE_MS * Math.pow(2, this.patrolFailStreak - 1);
-                    if(backoff > PATROL_BACKOFF_MAX_MS)backoff = PATROL_BACKOFF_MAX_MS;
-                    //jitter so a whole squad of stuck guards doesn't search on the same frame
-                    this.patrolRetryAt = now + backoff + Math.random() * PATROL_BACKOFF_BASE_MS;
+                var destination = nav.randomDestinationNear({x:this.x,y:this.y});
+                if(!destination){
+                    //nowhere to go (boxed in) — check back later, don't spin
+                    this.patrolRetryAt = now + PATROL_BACKOFF_MAX_MS;
+                    return;
                 }
+                var guard = this;
+                //Patrol is the lowest priority: a guard chasing the hero jumps this queue.
+                nav.requestPath({
+                    owner: this,
+                    from: {x:this.x,y:this.y},
+                    to: destination,
+                    radius: this.radius,
+                    priority: PathPriority.Patrol,
+                    onReady: function(path){
+                        guard.path = path;
+                        guard.patrolFailStreak = 0;
+                        guard.patrolRetryAt = gameClock.now() + PATROL_MIN_INTERVAL_MS;
+                    },
+                    onFail: function(){
+                        guard.patrolFailStreak++;
+                        var backoff = PATROL_BACKOFF_BASE_MS * Math.pow(2, guard.patrolFailStreak - 1);
+                        if(backoff > PATROL_BACKOFF_MAX_MS)backoff = PATROL_BACKOFF_MAX_MS;
+                        //jitter so a whole squad of stuck guards doesn't retry in lockstep
+                        guard.patrolRetryAt = gameClock.now() + backoff + Math.random() * PATROL_BACKOFF_BASE_MS;
+                    },
+                });
+                //don't re-ask before the request has had a chance to run
+                this.patrolRetryAt = now + PATROL_MIN_INTERVAL_MS;
             }else{
                 //can't move right now, check back shortly rather than every frame
                 this.patrolRetryAt = now + PATROL_MIN_INTERVAL_MS;
@@ -114,21 +138,19 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
             this.startedIdling = false;
 
         };
-        
+
         this.pathToCoords = function(x,y){
-            //finds a path to patrol
-        
-            //if the sprite is able to move
+            //Converge on a shared target (in practice: the hero's last known position).
+            //
+            //This is the case the flow field exists for — the whole squad wants a route
+            //to the same cell, so nav runs ONE reverse Dijkstra and every guard reads
+            //its route out of the direction table. 15 guards converge for the price of
+            //one search, where the old code ran 15 full A*s on the same frame.
             if(this.moving){
-                //find new patrol path:
-                var newCellToPatrolTo = grid.getIndexFromCoords_2d(x,y);
-                newCellToPatrolTo = grid.get1DIndexFrom2DIndex(newCellToPatrolTo.x,newCellToPatrolTo.y);
-                var newCellInfo = grid.getInfoFromIndex(newCellToPatrolTo);
-                var newCellIndex = {x: newCellInfo.x_index, y: newCellInfo.y_index};
-                var currentIndex = grid.getIndexFromCoords_2d(this.x,this.y);
-                this.path = grid.getPath(currentIndex,newCellIndex);
+                var path = nav.convergeTo({x:this.x,y:this.y},{x:x,y:y},this.radius);
+                if(path.length > 0)this.path = path;
             }
-        
+
         };
         
         this.seeAlarmingObject = function(objectOfAlarm){

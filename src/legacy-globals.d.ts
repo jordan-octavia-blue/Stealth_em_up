@@ -102,17 +102,12 @@ declare global {
   var tile_container_white: any;
   var tile_containers: any;
 
-  // astar.ts — published by the vendored UMD wrapper, not by a top-level declaration
-  var astar: any;
-  var Graph: any;
-
   // Stats.ts
   var Stats: any;
 
   // jo_raycast.ts
   var getRaycastPoint: any;
   var getRaycastPointIgnoreDoor: any;
-  var isLineOKForPath: any;
   var lineOfSight: any;
   var lineOfSightIgnoreDoor: any;
   var nextPointAlongRay: any;
@@ -256,6 +251,9 @@ declare global {
   var messages_floating: any;
   var mouse: any;
   var mouse_relative: any;
+  // debug-only: published by src/systems/nav_debug.ts so the console and the headless
+  // perf harness can read nav.stats. No shipping code reads it.
+  var nav: any;
   var newFloatingMessage: any;
   var newMessage: any;
   var notifyGuardsOfHeroLocation: any;

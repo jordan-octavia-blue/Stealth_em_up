@@ -39,7 +39,6 @@ import './legacy/jo_utility';
 import './legacy/jo_doodad';
 import './legacy/jo_wall';
 import './legacy/jo_grid';
-import './legacy/astar';
 import './legacy/Stats';
 import './legacy/jo_raycast';
 import './legacy/jo_security_camera';

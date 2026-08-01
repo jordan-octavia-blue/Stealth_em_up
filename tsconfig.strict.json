@@ -1,0 +1,21 @@
+{
+  // Roadmap §2.1: "All new systems (src/nav/, src/ai/, src/physics/, ...) are written
+  // strict from day one." The root tsconfig stays loose for the legacy files; this one
+  // type-checks the modern directories under full strictness, and CI runs both.
+  //
+  // The `include` list is deliberately narrow — the ambient legacy globals
+  // (src/legacy-globals.d.ts) are not in scope here, so anything that reaches for a
+  // window global fails to compile. That is the point: these modules take their world
+  // through parameters and imports.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "strictNullChecks": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src/core", "src/nav", "test/core", "test/nav"]
+}

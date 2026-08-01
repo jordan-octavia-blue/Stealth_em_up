@@ -21,7 +21,9 @@ Guiding constraints:
 > below are the originals. The pathologies themselves are all still there; that is what
 > Phases 2+ are for. **Post-Phase 2:** pathology #4 (framerate-dependent simulation and
 > raw wall-clock AI timers) is fixed — fixed 60 Hz timestep plus the pausable
-> `GameClock`.
+> `GameClock`. **Post-Phase 3:** pathologies #1 and #2 are fixed — `src/nav/` replaced
+> the vendored A\* and its never-updated graph; the last item of #8 (the
+> `alarmingObjects` array) is Phase 6 work.
 
 The game is plain ES5 loaded as 27 ordered `<script>` tags in `game.html`, sharing ~100
 globals. Pixi.js v3 is vendored in `bin/`. There is no npm, no bundler, no modules — the
@@ -611,13 +613,113 @@ froze at the menu→game transition — `clearStage()`'s clear-all-timeouts hack
 the render loop's pending timeout. Exactly the class of friendly-fire the `GameClock`
 migration removes.
 
-### Phase 3 — Pathfinding v2 (~1–2 weeks)
+### Phase 3 — Pathfinding v2 (~1–2 weeks) ✅ done
 
 All of §4. Guards switch to `nav.requestPath`. Delete `js/astar.js` and the graph code in
 `jo_grid.js:407-423`. Debug overlay (paths, regions, danger heatmap) behind a hotkey.
 **Verify:** Vitest is the star — golden paths, corner-cutting, region labels, scheduler
 budget, flow-field directions, danger decay. Frame time with 15 patrolling guards vs the
 Phase 0 baseline.
+
+#### What shipped
+
+`src/nav/` — 8 files, strict TypeScript, no window globals, no Pixi:
+
+| File | What it owns |
+|---|---|
+| `navgrid.ts` | The data layout: `walkable: Uint8Array`, `baseCost`/`doorCost`/`dangerCost` `Float32Array`s, the 8-direction tables, and the per-search **generation stamp** that replaced `astar.init`'s reset-all-1600 loop with one integer bump. Also `canStep` — the single definition of "is this move legal", including the no-corner-cutting rule — and `nearestWalkable`, which snaps a request whose end sits in a solid cell. |
+| `astar.ts` | 8-connected A\*, octile heuristic, cost layers summed at expansion, lazy-deletion heap. ~120 lines. |
+| `heap.ts` | Binary min-heap over cell indices, keyed by an external score array and reused between searches. |
+| `regions.ts` | Connected-component labelling with the *same* step rule as the search, so "same label" is exactly "a path exists". Recomputed wholesale on any walkability change (microseconds at 1600 cells). |
+| `flowfield.ts` | One reverse Dijkstra from a shared target → distance + best-direction per cell, plus `pathFromField` (pure table walk). |
+| `danger.ts` | The decaying heatmap: splatted deposits with linear falloff, exponential decay by half-life, a per-cell clamp. Pure functions over the layer. |
+| `smooth.ts` | String pulling, checked against grid flags via voxel traversal — and against **both flanks** of the unit's body, which is what keeps guards off wall corners. |
+| `scheduler.ts` | `requestPath` → `PathHandle`, per-frame budget (4 searches / 0.5 ms), priority (combat > investigate > patrol), coalescing per requester. |
+| `index.ts` | The `nav` facade: builds the layers from `jo_grid`, owns the flow-field cache, subscribes to `nav:dirty` and `nav:danger`, and is the only thing the rest of the game talks to. |
+
+What changed outside `src/nav/`:
+
+- **`grid.getPath` and the A\* graph are gone**, along with `astar.js` (deleted, 399 lines),
+  `reducePathWithShortcut`/`isShortcutOK`, the two `getRandomNonSolid*CellIndex` samplers, and
+  `jo_raycast`'s `isLineOKForPath` (its only caller was the shortcut test). `grid.angleBetweenPoints`
+  stayed — it is pure math the blood-splatter code also uses.
+- **Guards ask, they don't search.** `getRandomPatrolPath()` samples a destination from the
+  guard's own region and posts a `Patrol` request; `pathToCoords()` — always called with the
+  hero's last known position — goes through the flow field instead. Callers keep their old
+  path until a new one is delivered.
+- **`nav.update(deltaTime)`** runs once per fixed step, before the guards, decaying danger and
+  draining the queue under budget.
+- **The bomb feeds nav.** `explodeBomb` collects the cells it opens and emits one
+  `nav:dirty` batch (plus a `nav:danger` deposit); `grid.makeWallSolid` emits the inverse.
+  Guard deaths and gunshots emit `nav:danger`. Phase 5 replaces the bomb's ad-hoc block with
+  `damageCell`, but the seam is already the one it will use.
+- **Debug overlay on `N`**, cycling off → paths → regions → danger → flow field
+  (`src/systems/nav_debug.ts`), listed in the in-game controls table.
+- **`tsconfig.strict.json`** type-checks `src/core` and `src/nav` under full `strict` with the
+  legacy ambient globals deliberately *out* of scope, so nothing modern can quietly reach for a
+  window global. `npm run typecheck` runs both configs; CI is unchanged and picks it up.
+
+#### The four pathologies §4 was aimed at
+
+| | Before | After |
+|---|---|---|
+| Unreachable patrol destinations | sampled from anywhere on the map; a sealed-room pick returned no path and was retried forever (Phase 0 capped it with a backoff) | sampled from the requester's own region label — reachable by construction, and the scheduler checks region equality before searching at all, so a genuinely unreachable request costs one integer compare |
+| Search scratch | `astar.init` reset all 1600 nodes per search | generation stamp: one `generation++` |
+| Squad convergence | one full A\* per guard per "everyone repath" pulse | one Dijkstra for the whole squad; each guard reads its route from the direction table |
+| Blown-open walls | graph built once at setup — a breach stayed impassable for the rest of the run | `nav:dirty` → walkable, relabel, drop flow fields; the gap is pathable on the next step |
+
+#### Phase 3 verification
+
+**Vitest: 105 new cases** across 8 nav suites (172 total, all green) — golden paths and octile
+distance, the corner-cutting rule, cost-layer detours (danger and doors), sealed rooms, region
+labelling and merge-on-breach, flow-field distances/directions/agreement with A\*, danger
+falloff and framerate-independent decay, scheduler budget/priority/coalescing/handle states,
+string pulling with body clearance, and the facade end-to-end (build from a legacy-shaped grid,
+`nav:dirty` merging two rooms, `nav:danger` bending a route, reset between runs).
+
+**Headless Playwright** (software rendering) against the production build, same scenario on the
+Phase 2 tip and on Phase 3: `bank_1`, all backup spawned (**20 guards**), squad alarmed, a
+"repath to the hero" pulse every second for 10 s. Per-fixed-step `gameloop()` cost — `animate()`
+brackets the catch-up loop with `stats.begin/end`, so the frame total divided by the number of
+steps that frame is the per-step cost:
+
+| | mean | p50 | p95 | max | A\* searches/sec |
+|---|---|---|---|---|---|
+| Phase 2 (`grid.getPath`) | 0.31 / 0.28 ms | 0.23 / 0.20 ms | 0.60 / 0.55 ms | 2.15 / 2.10 ms | **8.9 / 9.8** |
+| Phase 3 (`src/nav`) | 0.29 / 0.28 ms | 0.23 / 0.23 ms | 0.67 / 0.50 ms | 2.03 / 1.60 ms | **0.7 / 0.5** |
+
+(two runs each). Frame time is a wash, as it was in Phase 0 — `bank_1` is well connected and
+the searches were never the bottleneck on this map. The searches themselves are what changed:
+an order of magnitude fewer, because convergence costs one flow field (1 rebuild for the whole
+10 s run — the field is keyed on the target cell) and patrols are queued and coalesced. The
+~2 ms tail is present on *both* builds, so it is not a nav cost.
+
+Convergence still *behaves* the same, which is the thing the flow field must not break: with
+the same pulse scenario, 12 of 20 guards closed meaningfully on the hero on both builds, mean
+distance 1712 → 990 px (Phase 2) vs 1634 → 911 px (Phase 3).
+
+The storm's worst case, for comparison with the Phase 0 table: a guard walled into a one-cell
+region — the situation that used to loop A\* forever — now runs **0 searches/sec**, because
+`randomDestinationNear` has nowhere to point it and returns null. The other guards keep
+patrolling normally.
+
+| | A\*/sec, patrol with unreachable destinations |
+|---|---|
+| pre-Phase 0 | 166 |
+| Phase 0 (backoff) | 8 |
+| Phase 3 (region sampling) | **0** |
+
+**Smoke checklist** (§10.1), automated against the production build: map loads with no console
+or page errors; WASD moves the hero; all 6 guards get paths and walk them; both security
+cameras sweep; loot pickup and the van win condition fire; shooting a guard kills them, drops
+the gun and clears their path; the bomb fuse freezes under pause and resumes; the blast opens
+walls **and nav sees it** — a guard immediately gets a path through the new gap (the marquee
+Phase 5 test, working already for pathfinding); the `N` overlay cycles all five modes.
+
+Two real bugs the verification caught, both fixed: the overlay's path mode called
+`Graphics.lineTo` after `drawCircle`, which throws in Pixi v3 (it ends the current path) and
+killed the gameloop; and `grid.angleBetweenPoints` was deleted with the shortcut code even
+though the blood-splatter paths still call it.
 
 ### Phase 4 — Physics (planck.js) + 4b Fog-of-war (~2–3 weeks)
 
@@ -696,6 +798,9 @@ If motivation needs a fun win early, pull Phase 7 forward to right after Phase 4
          range die, and standing on it kills the hero.
    - [ ] Pause mid-fuse — the countdown freezes and resumes correctly.
    - [ ] Reach the van with the loot and win; then die and confirm the death/restart flow.
+   - [ ] Press `N` — the nav overlay cycles paths / regions / danger / flow field and back
+         off, and the guard paths drawn match where they actually walk. (Added in Phase 3;
+         it is also the fastest way to see a bug in a later phase's nav changes.)
 
    Phase 0 note: the checklist above was verified headlessly (Playwright driving Chromium),
    including guard patrol, camera swivel, blood trail, and the full bomb/pause/blast path.
