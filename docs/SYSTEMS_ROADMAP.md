@@ -16,6 +16,11 @@ Guiding constraints:
 
 ## 1. Where the code is today
 
+> **Note (post-Phase 1):** this section describes the code as found. Phase 0 deleted the
+> dead weight and Phase 1 moved `js/*.js` to `src/legacy/*.ts` under Vite — file paths
+> below are the originals. The pathologies themselves are all still there; that is what
+> Phases 2+ are for.
+
 The game is plain ES5 loaded as 27 ordered `<script>` tags in `game.html`, sharing ~100
 globals. Pixi.js v3 is vendored in `bin/`. There is no npm, no bundler, no modules — the
 current `package.json` is actually an nw.js 0.12.2 app manifest. `js/main.js` is a
@@ -442,13 +447,69 @@ The storm itself was measured directly, by stubbing `grid.getPath` to always ret
 
 Use these numbers as the reference point for the Phase 3 and Phase 4 comparisons.
 
-### Phase 1 — Tooling: Vite + TypeScript + Vitest (days)
+### Phase 1 — Tooling: Vite + TypeScript + Vitest (days) ✅ done
 
 Real npm `package.json`; Vite; mechanical ESM + `.ts` conversion of `js/*` with the
 `src/legacy-bridge.ts` window bridge (loose tsconfig, §2.1); jQuery → `fetch`; Vitest with
 first tests against the pure-math files (`jo_math`, `jo_utility`). Optional CI
 (`vitest run` + `vite build`).
 **Verify:** behaviorally identical game under `npm run dev` and `npm run build && preview`.
+
+#### What shipped
+
+- **npm + Vite + Vitest + TypeScript.** The nw.js manifest moved to `nw-package.json`;
+  `package.json` is now a real one (`dev` / `build` / `preview` / `typecheck` / `test`).
+  `vite.config.ts` is multi-page (`index`, `game`, `menu`, `keybindings`) and shares its
+  config with Vitest. `local_server_for_testing.bat` is gone. CI runs typecheck, tests and
+  a production build on every push.
+- **`js/*.js` → `src/legacy/*.ts`**, converted by a codemod, not by hand. `tsconfig.json`
+  is loose as planned (`strict: false`, `noImplicitAny: false`); `npm run typecheck`
+  passes.
+- **The bridge.** `src/legacy-bridge.ts` imports the 25 files in the old script-tag order;
+  `src/legacy-globals.d.ts` declares the ~300 shared names so the untouched code still
+  type-checks. One deviation from §2.2 worth recording: the roadmap pictured the bridge
+  itself doing `window.grid = grid`, but a re-export from the bridge snapshots the value
+  at import time and goes stale on the next assignment. Mutable globals are therefore
+  published *inside* each legacy file (top-level `var x = …` became `window.x = …`), and
+  functions are republished in an `Object.assign(window, { … })` at the bottom of each
+  file. The bridge owns load order and documents the contract; extraction work still
+  deletes one import here and one name from the `.d.ts` per subsystem.
+- **jQuery is gone** from the game: the map XHR is `fetch` (with the error handler kept as
+  the second argument to `.then`, so a failed request still alerts but a bad map or a
+  broken `windowSetup` surfaces instead of being reported as "file not found"), and the
+  three DOM calls are plain DOM. `menu.html` keeps its own jQuery for the upgrade shop; it
+  no longer `<script>`-preloads the whole game, and the one module it does need
+  (`jo_local_storage`) arrives via `src/menu.ts`.
+- **First Vitest suites:** 45 tests over `jo_math` and `jo_utility` — movement stepping,
+  rotation, the biased RNG, angle/arc wrap-around, circle-segment intersection, LOS
+  quicksort. Several pin known quirks (`randomFloatWithBias`'s `min` shifts rather than
+  bounds the range; a segment entirely inside a circle reads as a *miss*) so Phases 3–4
+  can't change them by accident.
+
+#### Two real bugs the conversion exposed
+
+ES modules are always strict; the old `<script>` tags were sloppy. Two classes of latent
+bug only showed up because of that, and both would have been silent breakage:
+
+| | |
+|---|---|
+| **~55 implicit globals.** `onAssetsLoaded()` assigned every `img_*` sprite-sheet handle without `var`, as did `shard`/`shell`/`currentShard`/`shardImages`/`percent`/`mouse_click_obj`. Sloppy mode created a global; strict mode throws `ReferenceError`. They are now explicit `window.*` writes at the assignment sites — behaviour identical, and `legacy-globals.d.ts` flags which ones are actually dead or want to be locals. | `images_from_sheet.ts`, `main.ts`, `jo_progress_bar.ts` |
+| **The vendored UMD wrappers broke bundling.** `astar.js` and `Stats.js` sniff for CommonJS before falling back to `window`. Seeing `module.exports` in the source made Vite classify the *whole chunk* as CommonJS and hand it a real `module` object, so astar registered into a throwaway export: `window.astar`/`window.Graph` were never set and the build died on the first path request. Dev was unaffected, which is exactly how this reaches production unnoticed. Both wrappers now take the browser branch unconditionally. | `astar.ts`, `Stats.ts` |
+
+#### Phase 1 verification
+
+The §10 smoke checklist was automated (Playwright driving Chromium) and run against three
+targets: the pre-conversion commit, `npm run dev`, and `npm run build` + `preview`. It
+covers map load, WASD movement, guard patrol, camera sweep, loot pickup, shooting a guard
+(death, gun drop, blood, squad alert), the full bomb path (plant, fuse countdown, pause
+freezes and resumes it, blast opens a wall and kills the hero standing on it), and the win
+condition. **All three produce byte-identical results.**
+
+The one caveat: the sandbox blocks outbound CDNs, so the baseline had to be run with a
+locally-served jQuery — which is itself a small argument for the `fetch` swap, since the
+unmodified `master` page cannot start at all without reaching `ajax.googleapis.com`. A
+human playthrough for *feel* is still worth doing; the automated pass only proves nothing
+throws and the state changes match.
 
 ### Phase 2 — Core loop: fixed timestep, clock, events (~1 week)
 

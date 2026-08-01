@@ -214,8 +214,11 @@
     <link href="//cdn.datatables.net/1.10.4/css/jquery.dataTables.min.css" rel="stylesheet" type="text/css">
     <script src="//cdn.datatables.net/1.10.4/js/jquery.dataTables.min.js"></script>
     
-    <script src="bin/pixi.js"></script>
-	
+    <script src="/bin/pixi.js"></script>
+
+    <!-- The upgrade shop reads/writes the jo_store_* helpers; loading them as a module
+         keeps this page on the same source as the game (see src/menu.ts). -->
+    <script type="module" src="/src/menu.ts"></script>
 </head>
     <script>
         function finishedloading(text){
@@ -259,29 +262,9 @@
     </div>
     
     <div id="canvas_holder"></div>
-    <script onload="finishedloading('script1');" src="js/jo_gun.js"></script>
-    <script onload="finishedloading('script1b');" src="js/jo_gun_drop.js"></script>
-    <script onload="finishedloading('script2');" src="js/menu_button_manager.js"></script>
-    <script onload="finishedloading('script3');" src="js/jo_debug.js"></script>
-    <script onload="finishedloading('script4');" src="js/jo_door.js"></script>
-    <script onload="finishedloading('script5');" src="js/jo_math.js"></script>
-	<script onload="finishedloading('script6');" src="js/jo_sprite.js"></script>
-	<script onload="finishedloading('script7');" src="js/jo_cam.js"></script>
-	<script onload="finishedloading('script8');" src="js/jo_utility.js"></script>
-	<script onload="finishedloading('script9');" src="js/jo_wall.js"></script>
-	<script onload="finishedloading('script10');" src="js/jo_grid.js"></script>
-	<script onload="finishedloading('script11');" src="js/astar.js"></script>
-	<script onload="finishedloading('script12');" src="js/Stats.js"></script>
-	<script onload="finishedloading('script13');" src="js/jo_raycast.js"></script>
-	<script onload="finishedloading('script14');" src="js/jo_security_camera.js"></script>
-	<script onload="finishedloading('script15');" src="js/sprite_hero.js"></script>
-	<script onload="finishedloading('script16');" src="js/sprite_guard.js"></script>
-    <script onload="finishedloading('script18');" src="js/jo_movie_clip.js"></script>
-    <script onload="finishedloading('script19');" src="js/sound_manager.js"></script>
-    <script onload="finishedloading('script20');" src="js/jo_progress_bar.js"></script>
-    <script onload="finishedloading('script21');" src="js/jo_local_storage.js"></script>
-    <!--CAUSED ERROR<script onload="finishedloading('script22');" src="js/jo_doodad.js"></script>-->
-    <!--  EVERYTHING ABOVE IS FOR PRELOADING ^^ <script src="js/main.js"></script>-->
+    <!-- This page used to <script>-load the whole game here purely to warm the browser
+         cache before game.html asked for the same files. The game is a single bundled
+         module entry now, so there is nothing left to preload. -->
     <script>
       (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
       (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
@@ -527,7 +510,7 @@
         </tr>
         </table>
     </div>
-    <div align="right" id="mailingList"class="body_content" >
+    <div align="right" id="mailingList" class="body_content" >
         <!-- Begin MailChimp Signup Form -->
         <link href="//cdn-images.mailchimp.com/embedcode/classic-081711.css" rel="stylesheet" type="text/css">
 
@@ -694,10 +677,14 @@
             "Body_armor":{"cost": 2, "description":"50% chance to survive a fatal wound.", "image": "A_Armour01"},
             "<strike>Plastic Surgery</strike>":{"cost": 10, "description":"Everyone forgets what you look like.", "image": "I_Mirror"}
         };
+        //jo_store_* now arrives from a module (src/menu.ts), which the browser defers
+        //until after the document is parsed - so the save-file bootstrap waits for it.
+        //Function declarations stay at this scope: the inline onclick= handlers need them.
+        document.addEventListener('DOMContentLoaded', function(){
         //if no games have been played, reset the stats:
         if(jo_store_get('game_count')===undefined)newGameReset();
         else jo_store_inc('game_count');
-        
+
         //remove upgrade buttons that have already been researched:
         if(jo_store_get('hero_health')>1)delete upgrades["More Health"];
             console.log('----------------');
@@ -725,7 +712,8 @@
         
         update_stats();
         refreshAvaliableUpgrades();
-    
+        });
+
         var test;
         //pull level maps from server
         //fill level select with names of all maps:
