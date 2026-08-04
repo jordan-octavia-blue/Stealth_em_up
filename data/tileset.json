@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "tiles": {
+    "1": { "material": "brick",   "hp": 60, "blocksVision": true,  "rubbleTile": 2 },
+    "3": { "material": "drywall", "hp": 15, "blocksVision": false, "rubbleTile": 2 },
+    "5": { "material": "brick",   "hp": 40, "blocksVision": true,  "rubbleTile": 2 },
+    "6": { "material": "brick",   "hp": 40, "blocksVision": true,  "rubbleTile": 2 }
+  }
+}

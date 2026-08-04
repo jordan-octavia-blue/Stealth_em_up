@@ -5,6 +5,7 @@ me at jdoleary@gmail.com
 /*******************************************************/
 import { events } from '../core/events';
 import { physics } from '../physics';
+import { findWallType as computeWallType } from '../render/autotile';
 //also referred to as "cell"
 window.walls = {
     black:{
@@ -41,6 +42,11 @@ function jo_wall(image_number,solid,blocks_vision,restricted,vertices,grid_index
     this.blocks_vision = blocks_vision;//enemies cannot see / shoot through wall which blocks vision
     this.restricted = restricted; //the hero will cause alert if he is seen on a restricted tile even unmasked.
     this.door = false;
+    //Destructible-wall state (roadmap §6.1). Filled in by jo_grid from data/tileset.json:
+    //`material` (what it's made of, drives which damage types hurt it) and `hp` (how much
+    //damage it absorbs before grid.damageCell breaks it). Floors leave these null/0.
+    this.material = null;
+    this.hp = 0;
     this.image_number = image_number; //for keeping track of the type of cell image
     this.rotate_sprite;//for rotating the wall sprite because the tile sheet only contains one orientation.
     
@@ -64,9 +70,15 @@ function jo_wall(image_number,solid,blocks_vision,restricted,vertices,grid_index
     this.y = this.v8.y;
     
     this.changeImage = function(image_number_p){
-        
+
         //remove previous sprite
         if(this.image_sprite!=undefined)tile_containers[this.image_number].removeChild(this.image_sprite);
+        //Reset the rotation offsets each time: a wall re-tiled after a nearby breach can go
+        //from a rotated variant (offset 64) back to an unrotated one, and a stale offset
+        //would draw its sprite a cell off. Case 0 below re-derives them from rotate_sprite.
+        this.rotate_sprite = 0;
+        this.offsetX = 0;
+        this.offsetY = 0;
         
         switch(image_number_p) {
         case 0:
@@ -157,57 +169,14 @@ function jo_wall(image_number,solid,blocks_vision,restricted,vertices,grid_index
         this.image_sprite.position.y = this.y+this.offsetY;
     };
     
+    //The neighbour-counting logic moved to src/render/autotile.ts so the breach pipeline
+    //can re-tile a hole's edges with the same rule (roadmap §6.2). This thin wrapper keeps
+    //changeImage's contract: it sets this.rotate_sprite (which changeImage reads straight
+    //after) and returns the sprite-variant name.
     this.findWallType = function(){
-        //corner,long,T,single,edge,four
-        var count_of_walls = 0;
-        var north = grid.getCellFromIndex(this.grid_index_x,this.grid_index_y-1);
-        var south = grid.getCellFromIndex(this.grid_index_x,this.grid_index_y+1);
-        var east = grid.getCellFromIndex(this.grid_index_x+1,this.grid_index_y);
-        var west = grid.getCellFromIndex(this.grid_index_x-1,this.grid_index_y);
-        var northWall = north && north.solid && !north.door && north.blocks_vision;
-        var southWall = south && south.solid && !south.door && south.blocks_vision;
-        var eastWall = east && east.solid && !east.door && east.blocks_vision;
-        var westWall = west && west.solid && !west.door && west.blocks_vision;
-        if(northWall)count_of_walls++;
-        if(southWall)count_of_walls++;
-        if(eastWall)count_of_walls++;
-        if(westWall)count_of_walls++;
-        switch(count_of_walls){
-            case 0:
-                return "single";
-                break;
-            case 1:
-                if(westWall)this.rotate_sprite = Math.PI;
-                if(southWall)this.rotate_sprite = Math.PI/2;
-                if(northWall)this.rotate_sprite = -Math.PI/2;
-                return "edge";
-                break;
-            case 2:
-                if((northWall && southWall)){
-                    this.rotate_sprite = Math.PI/2;
-                    return "long";
-                }
-                if((eastWall && westWall)){
-                    return "long"; 
-                }
-                else{
-                    if(northWall && westWall)this.rotate_sprite = Math.PI/2;
-                    if(northWall && eastWall)this.rotate_sprite = -Math.PI/2;
-                    if(northWall && westWall)this.rotate_sprite = Math.PI;
-                    if(southWall && westWall)this.rotate_sprite = Math.PI/2;
-                    return "corner";
-                }
-                break;
-            case 3:
-                if(northWall && southWall && eastWall)this.rotate_sprite = -Math.PI/2;
-                if(northWall && southWall && westWall)this.rotate_sprite = Math.PI/2;
-                if(northWall && eastWall && westWall)this.rotate_sprite = Math.PI;
-                return "T";
-                break;
-            case 4:
-                return "four";
-                break;
-        }
+        var tile = computeWallType(grid, this.grid_index_x, this.grid_index_y);
+        this.rotate_sprite = tile.rotation;
+        return tile.type;
     }
     
     

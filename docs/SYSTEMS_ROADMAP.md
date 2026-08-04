@@ -27,7 +27,14 @@ Guiding constraints:
 > the hero's 1600-cell loop, the O(n²) guard separation and the doors×guards loop are
 > gone, and guards collide with walls) and #7 is fixed (fog of war rebuilt and switched
 > back on). Of #5, only the vision *raycast* changed — range, hearing, memory and
-> de-escalation are still Phase 6.
+> de-escalation are still Phase 6. **Post-Phase 5:** walls are destructible (§6). All
+> damage flows through one entry point, `grid.damageCell(index, amount, type)`, and a
+> destroyed cell runs an ordered pipeline off the new `cell:destroyed` event: grid flags,
+> nav, physics, fog, autotile (extracted to `src/render/autotile.ts`), then FX/AI. Cells
+> carry a `material` and `hp` from `data/tileset.json`; maps are loaded through a versioned
+> loader (`src/map/loader.ts`) that upgrades the old v1 `bank_1.jomap`. The old
+> geometry-change event `nav:dirty` stays only for the reverse case (an object sealing the
+> ground under itself); `nav:dirty` for breaches is gone.
 
 The game is plain ES5 loaded as 27 ordered `<script>` tags in `game.html`, sharing ~100
 globals. Pixi.js v3 is vendored in `bin/`. There is no npm, no bundler, no modules — the

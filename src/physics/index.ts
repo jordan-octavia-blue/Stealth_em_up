@@ -37,6 +37,9 @@ class Physics {
 
   constructor() {
     events.on('nav:dirty', (payload) => this.onGeometryChanged(payload as DirtyEvent));
+    // A destroyed cell (roadmap §6.2, pipeline step 3): drop its fixture so bodies, bullets
+    // and sight all pass through the hole. Deferred to post-step inside `clearCell`.
+    events.on('cell:destroyed', (payload) => this.onGeometryChanged(payload as DirtyEvent));
   }
 
   get ready(): boolean {

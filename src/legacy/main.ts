@@ -13,6 +13,11 @@ import { physics, CATEGORY } from '../physics';
 import { drawNavDebug, resetNavDebug } from '../systems/nav_debug';
 import { drawPhysicsDebug, resetPhysicsDebug } from '../systems/physics_debug';
 import { setupFog, updateFog, resetFog, FOG_RADIUS } from '../render/fog';
+import { loadMap } from '../map/loader';
+import { DAMAGE_AMOUNT } from '../map/tileset';
+// Side-effect import: wires the breach FX + AI listeners onto `cell:destroyed` (roadmap
+// §6.2 pipeline steps 6-7). No exported symbols; importing it once is the whole point.
+import '../systems/breach';
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 /*
@@ -1094,6 +1099,10 @@ function gameloop_bullets(deltaTime){
             //hit a wall: play a gun spark where the shot lands
             var end = hit ? hit : bullet.target;
             shardParticleSplatter(-grid.angleBetweenPoints(fromX,fromY,end.x,end.y),end);
+            //A bullet is the "small, only vs weak materials" damage source (roadmap §6.2):
+            //damageCell chews through drywall (shootable cover) and does nothing to masonry,
+            //so most walls just spark. hit.cell is -1 for non-cell hits (a bounced shot).
+            if(hit && hit.cell >= 0)grid.damageCell(hit.cell, DAMAGE_AMOUNT.bullet, 'bullet');
             removeBullet(b);
             b--;
             continue bulletLoop;
@@ -1829,52 +1838,19 @@ function explodeBomb(){
         notifyGuardsOfHeroLocation = true;
     
     //destroy nearby walls:
-    //Cells that stop being solid are collected and handed to nav in one batch, so a
-    //blown-open wall is pathable immediately (roadmap pathology #2 — the old A* graph
-    //was built once at setup and never updated, so guards treated a breach as a wall
-    //for the rest of the run). Phase 5 replaces this block with grid.damageCell().
-    var breachedCells = [];
+    //Every cell in the blast radius takes a large `bomb` hit through the one damage entry
+    //point (roadmap §6.2). damageCell decides per cell whether it breaks — it skips the
+    //map border and any material tougher than the blast (steel) — and, for the ones that
+    //do, runs the whole destroy pipeline: grid flags, then nav (walkable + regions + flow
+    //fields), physics (drop the fixture), fog (see through the hole), autotile edges, and
+    //the FX/AI breach response. This replaces the ad-hoc block that used to live here.
     for(var w = 0; w < grid.cells.length; w++){
         if(get_distance(bomb.x,bomb.y,grid.cells[w].x,grid.cells[w].y) < bomb_radius){
-            var wallInfo = grid.getInfoFromIndex(w);
-            //do not blow through map bounds walls
-            if(wallInfo.x_index != 0 && wallInfo.x_index != grid.width-1 && wallInfo.y_index != 0 && wallInfo.y_index != grid.height-1){
-                
-                //test if any surrounding tiles are restricted:
-                var makeRestricted = false;
-                if(grid.isTileRestricted_coords(grid.cells[w].x-64,grid.cells[w].y))makeRestricted = true;
-                if(grid.isTileRestricted_coords(grid.cells[w].x+64,grid.cells[w].y))makeRestricted = true;
-                if(grid.isTileRestricted_coords(grid.cells[w].x,grid.cells[w].y-64))makeRestricted = true;
-                if(grid.isTileRestricted_coords(grid.cells[w].x,grid.cells[w].y+64))makeRestricted = true;
-                
-                if(makeRestricted)grid.cells[w].changeImage(4);
-                else{
-                    if(grid.cells[w].image_number != 1 && grid.cells[w].image_number != 3 && grid.cells[w].image_number != 4)grid.cells[w].changeImage(1);
-                }
-                
-                if(grid.cells[w].solid || grid.cells[w].door)breachedCells.push(w);
-                grid.cells[w].solid = false;
-                grid.cells[w].blocks_vision = false;
-                grid.cells[w].door = false;
-
-            }
-
+            grid.damageCell(w, DAMAGE_AMOUNT.bomb, 'bomb');
         }
     }
-    //A door whose cell has been blown away must stop opening and closing itself, or the
-    //next guard walking past would flip `solid`/`blocks_vision` back on and put a
-    //phantom wall in the middle of the hole. `broken` is the door's existing "kicked
-    //down" state and both open() and close() already honour it.
-    for(var ds = 0; ds < grid.door_sprites.length; ds++){
-        var door_sprite = grid.door_sprites[ds];
-        if(breachedCells.indexOf(door_sprite.relatedDoorWall.cellIndex()) !== -1){
-            door_sprite.open();
-            door_sprite.broken = true;
-        }
-    }
-    //nav re-derives walkability and physics drops the fixtures; both listen to this.
-    if(breachedCells.length > 0)events.emit('nav:dirty', breachedCells);
-    //a blast is a loud, dangerous thing to have happened here
+    //The overall blast is a loud, dangerous thing to have happened here (on top of the
+    //per-breach danger each destroyed cell deposits).
     events.emit('nav:danger', {x: bomb.x, y: bomb.y, amount: 8, radius: 3});
 
     //see if it kills anyone:
@@ -1975,7 +1951,10 @@ function getMapInfo(subdir, fileName){
             console.log('OFF');
         } else {
             //you will have "Uncaught SyntaxError: Unexpected token e" here if the JSON does not parse correctly.
-            var map = JSON.parse(result);
+            //Run the parsed map through the versioned loader (roadmap §6.3): it upgrades the
+            //v1 bank_1.jomap (which has no `version` field) to the current format and fills in
+            //the v2 defaults (tilesetRef, patrolRoutes, hpOverrides) the game now reads.
+            var map = loadMap(JSON.parse(result));
             map_json = map;
             console.log("map loaded from server: " + map_json);
             windowSetup();

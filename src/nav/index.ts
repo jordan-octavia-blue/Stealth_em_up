@@ -77,6 +77,9 @@ class Nav {
 
   constructor() {
     events.on('nav:dirty', (payload) => this.markDirty(payload as NavDirtyEvent));
+    // A destroyed cell (roadmap §6.2, pipeline step 2) opens up exactly like a `nav:dirty`
+    // walkable cell: re-derive walkability, drop the region labels and the flow field.
+    events.on('cell:destroyed', (payload) => this.markDirty(payload as NavDirtyEvent));
     events.on('nav:danger', (payload) => this.deposit(payload as DangerEvent));
   }
 
