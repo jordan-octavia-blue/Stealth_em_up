@@ -49,6 +49,10 @@ let losPathGraphicsContainer: any = null;
 
 events.on('nav:dirty', invalidateOccluders);
 events.on('vision:dirty', invalidateOccluders);
+// A destroyed cell (roadmap §6.2, pipeline step 4): the wall is gone, so the occluder set
+// it contributed to is stale — rebuild it lazily on the next frame. Destroyed walls become
+// transparent to both the player's fog and the guards' sight in one stroke.
+events.on('cell:destroyed', invalidateOccluders);
 
 /** Drop the cached occluder segments; they are rebuilt on the next frame. */
 export function invalidateOccluders(): void {

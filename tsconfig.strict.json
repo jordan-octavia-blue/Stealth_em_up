@@ -17,5 +17,18 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/core", "src/nav", "src/physics", "src/fog", "test/core", "test/nav", "test/physics", "test/fog"]
+  "include": [
+    "src/core",
+    "src/nav",
+    "src/physics",
+    "src/fog",
+    "src/map",
+    "src/render/autotile.ts",
+    "test/core",
+    "test/nav",
+    "test/physics",
+    "test/fog",
+    "test/map",
+    "test/render/autotile.test.ts"
+  ]
 }

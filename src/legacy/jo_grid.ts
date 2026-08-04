@@ -1,4 +1,6 @@
 import { events } from '../core/events';
+import { tileDef, materialTakesDamage } from '../map/tileset';
+import { refreshAutotileAround } from '../render/autotile';
 
 //NOTE: to be batched, I think all images in spritebatch have to be the same sprite:
 window.tile_container_black ??= undefined;
@@ -276,8 +278,106 @@ function jo_grid(map){
             this.cells.push(new jo_wall(1,false,false,false,this.getWallCoords('square',x_index,y_index),x_index,y_index));
             break;
         };
+        //Attach destructible-wall data (roadmap §6.1): the material and hp for this tile
+        //code come from data/tileset.json; a map may override a single cell's starting hp
+        //via `hpOverrides`. Floors have no tileset entry and stay material:null / hp:0, so
+        //damageCell treats them as nothing to break.
+        var def = tileDef(tile_type);
+        var cell = this.cells[i];
+        if(def){
+            cell.material = def.material;
+            cell.hp = def.hp;
+            cell.rubbleTile = def.rubbleTile;
+        }
+        if(map.hpOverrides && map.hpOverrides[i] !== undefined){
+            cell.hp = map.hpOverrides[i];
+        }
+        //Remember the starting hp so the wall-destruction debug overlay (H key) can draw a
+        //bar as a fraction of full health. Damage only ever lowers cell.hp, never maxHp.
+        cell.maxHp = cell.hp;
     }
     delete this.map_data;
+
+    //Map a tile code to the image_number changeImage() draws. Used to pick the floor a
+    //breach leaves behind (the cell's `rubbleTile`).
+    this.imageForTileCode = function(tileCode){
+        switch(tileCode){
+            case 1: return 0; //black wall
+            case 2: return 1; //white floor
+            case 3: return 2; //brown
+            case 4: return 3; //red
+            case 5:
+            case 6: return 4; //door / red
+            default: return 1;
+        }
+    };
+
+    //Roadmap §6.2 — the ONE damage entry point. Bullets, the bomb, frag grenades and (in
+    //Phase 7) a car crash all call this; nothing destroys a wall any other way. `amount` is
+    //hit points removed, `type` is what is doing the damage (bullet/bomb/frag/car), which
+    //decides whether this material takes damage at all.
+    this.damageCell = function(index, amount, type){
+        var cell = this.cells[index];
+        if(!cell)return;
+        //Nothing to break: already destroyed, or a floor to begin with.
+        if(!cell.solid && !cell.door)return;
+        //Map-border cells stay indestructible — the outer ring is what keeps guards and the
+        //blast from escaping the map (preserved from the old bomb code).
+        var info = this.getInfoFromIndex(index);
+        if(info.x_index === 0 || info.x_index === this.width-1 || info.y_index === 0 || info.y_index === this.height-1)return;
+        //Steel is indestructible; other materials only take damage from the right source
+        //(a bullet does nothing to brick, a car stops dead against concrete, ...).
+        var material = cell.material || 'brick';
+        if(!materialTakesDamage(material, type))return;
+        cell.hp -= amount;
+        if(cell.hp > 0)return;
+        this.destroyCell(index);
+    };
+
+    //Roadmap §6.2 — the destroy pipeline. Runs once, when a cell's hp hits zero. Step 1
+    //(grid flags + the rubble sprite + retiring a blown-away door) and step 5 (re-tiling
+    //the breach's edges) happen here; steps 2-4 (nav, physics, fog) and 6-7 (FX, AI) are
+    //the ordered listeners on `cell:destroyed`. Grid flags are set BEFORE the event so every
+    //listener — and the autotile pass — sees the hole, not the wall.
+    this.destroyCell = function(index){
+        var cell = this.cells[index];
+        if(!cell)return;
+
+        //Step 1: grid flags. The cell stops being solid, opaque and a door all at once.
+        cell.solid = false;
+        cell.blocks_vision = false;
+        cell.door = false;
+
+        //Rubble sprite: a breach next to a staff-only (restricted) tile shows the red floor,
+        //matching the surroundings; otherwise the cell's `rubbleTile` (a plain floor). This
+        //reproduces the old bomb's restricted check.
+        var makeRestricted = false;
+        if(this.isTileRestricted_coords(cell.x-64,cell.y))makeRestricted = true;
+        if(this.isTileRestricted_coords(cell.x+64,cell.y))makeRestricted = true;
+        if(this.isTileRestricted_coords(cell.x,cell.y-64))makeRestricted = true;
+        if(this.isTileRestricted_coords(cell.x,cell.y+64))makeRestricted = true;
+        if(makeRestricted)cell.changeImage(4);
+        else cell.changeImage(this.imageForTileCode(cell.rubbleTile || 2));
+
+        //A door whose cell is blown away must stop opening and closing itself, or the next
+        //guard walking past would flip solid/blocks_vision back on and put a phantom wall in
+        //the hole. `broken` is the door's existing "kicked down" state; open()+close() honour it.
+        for(var ds = 0; ds < this.door_sprites.length; ds++){
+            var door_sprite = this.door_sprites[ds];
+            if(door_sprite.relatedDoorWall.cellIndex() === index){
+                door_sprite.open();
+                door_sprite.broken = true;
+            }
+        }
+
+        //Step 5: re-tile the breach's edges (the neighbours' wall sprites change shape).
+        refreshAutotileAround(this, index);
+
+        //Steps 2-4 (nav walkable + regions + flow fields, physics destroyFixture, fog
+        //occluder cache) and steps 6-7 (debris/dust/sound FX, AI danger + breach entry) are
+        //the ordered listeners on this event.
+        events.emit('cell:destroyed', index);
+    };
 
     ////////////////////////////////////////////////////////////////////////////
     // Pathfinding lives in src/nav/ (roadmap §4).
