@@ -292,6 +292,9 @@ function jo_grid(map){
         if(map.hpOverrides && map.hpOverrides[i] !== undefined){
             cell.hp = map.hpOverrides[i];
         }
+        //Remember the starting hp so the wall-destruction debug overlay (H key) can draw a
+        //bar as a fraction of full health. Damage only ever lowers cell.hp, never maxHp.
+        cell.maxHp = cell.hp;
     }
     delete this.map_data;
 

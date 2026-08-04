@@ -48,7 +48,7 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
         this.reload_speed = 2000;
         this.ability_toggle_mask_speed = 500;
         this.ability_choke_speed = 4000;
-        this.ability_timed_bomb = false;
+        this.ability_timed_bomb = true;//TESTING: granted so the bomb (F key) is usable for testing wall destruction
         this.ability_remote_bomb = false;
         this.ability_body_armor = false;
         

@@ -14,6 +14,7 @@ import { events } from '../core/events';
 import { ejectShell } from './particles';
 import { cycleNavDebug } from './nav_debug';
 import { cyclePhysicsDebug } from './physics_debug';
+import { cycleBreachDebug } from './breach_debug';
 import { physics } from '../physics';
 
 export function mouseMove(e){
@@ -98,6 +99,13 @@ export function addKeyHandlers(){
                     newMessage('Physics overlay: ' + cyclePhysicsDebug());
                 }
                 keys['b'] = true;
+            }
+            if(code == 72){
+                //key h: cycle the wall-destruction overlay (off / materials / hp)
+                if(!keys['h']){
+                    newMessage('Wall overlay: ' + cycleBreachDebug());
+                }
+                keys['h'] = true;
             }
             if(code == 70){
                 //plant bomb
@@ -279,6 +287,7 @@ export function addKeyHandlers(){
         if(code == 82){keys['r'] = false;}
         if(code == 78){keys['n'] = false;}
         if(code == 66){keys['b'] = false;}
+        if(code == 72){keys['h'] = false;}
         if(code == 86){
             //on release of key only
             //if(keys['v'])circProgBar.stop();//stop putting on mask

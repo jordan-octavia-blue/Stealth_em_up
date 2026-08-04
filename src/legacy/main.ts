@@ -12,6 +12,7 @@ import { nav } from '../nav';
 import { physics, CATEGORY } from '../physics';
 import { drawNavDebug, resetNavDebug } from '../systems/nav_debug';
 import { drawPhysicsDebug, resetPhysicsDebug } from '../systems/physics_debug';
+import { drawBreachDebug, resetBreachDebug } from '../systems/breach_debug';
 import { setupFog, updateFog, resetFog, FOG_RADIUS } from '../render/fog';
 import { loadMap } from '../map/loader';
 import { DAMAGE_AMOUNT } from '../map/tileset';
@@ -347,6 +348,7 @@ function clearStage(){
     physics.reset();
     resetNavDebug();
     resetPhysicsDebug();
+    resetBreachDebug();
     resetFog();
     //remove all children:
     removeAllChildren(display_tiles);
@@ -456,7 +458,7 @@ function startGame(){
     bomb.sprite.scale.y = 0.35;
     bomb.rad = Math.PI/6;
     
-    bombs_left = 1;
+    bombs_left = 5;//TESTING: extra bombs so wall destruction can be tried repeatedly
     
     bomb_fuse_start = 5000;//this is now set inside of setBomb
     bomb_fuse = bomb_fuse_start;
@@ -1573,6 +1575,9 @@ function gameloop(deltaTime){
 
     //physics/fog debug overlay (fixtures, sensors, occluders), cycled with the B key
     drawPhysicsDebug();
+
+    //wall-destruction debug overlay (materials / hp bars), cycled with the H key
+    drawBreachDebug();
 
     //The fog mask itself is redrawn once per *rendered* frame, from animate() — it is
     //presentation, and there is nothing to gain from sweeping twice for one picture.
