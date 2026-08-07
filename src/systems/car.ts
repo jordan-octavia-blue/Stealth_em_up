@@ -37,17 +37,35 @@ const CAR_ART_OFFSET = Math.PI / 2;
 /** How close (px, centre to centre) the hero must be to the van to climb in. */
 const ENTER_DISTANCE_PX = 96;
 
-/** Closing speed (px/s) at which hitting a guard is lethal rather than a nudge. */
+/**
+ * Speed (px/s) the van itself must be **driving** at for a unit it hits to be run over and
+ * killed. Below it, the unit is only shoved aside by the collision — so a parked or
+ * crawling van never hurts anyone, and a guard (or the hero on foot) can walk right up to
+ * it. This is the van's own speed, not the closing speed, so a person walking into a
+ * stationary van is never lethal.
+ */
 const RUN_OVER_SPEED_PX = 120;
 /** How hard, and how long, a run-over throws the body. */
 const KNOCKBACK_SPEED_PX = 420;
 const KNOCKBACK_MS = 300;
 
-/** Below this closing speed (px/s) the van bumps a wall without damaging it. */
+/** Below this closing speed (px/s) the van bumps a wall without damaging it at all. */
 const BREACH_SPEED_PX = 100;
-/** Breach damage per px/s of impact, clamped — a full-speed ram levels brick, a nudge does not. */
-const BREACH_DAMAGE_PER_SPEED = 0.2;
-const BREACH_DAMAGE_MAX = 80;
+/**
+ * Wall damage per px/s of impact, and the most any single impact can do. Deliberately small:
+ * one collision damages a wall but never levels a solid one — a 40–60 hp brick wall survives
+ * a full-speed ram and needs several. Drywall (15 hp) still gives way to one good hit, which
+ * is what makes it shootable/rammable cover.
+ */
+const BREACH_DAMAGE_PER_SPEED = 0.05;
+const BREACH_DAMAGE_MAX = 20;
+
+// --- taking fire while driving ----------------------------------------------
+
+/** Hits the van's bodywork can soak before it is wrecked (and the driver with it). */
+const CAR_MAX_HEALTH = 12;
+/** Per bullet, the chance a shot finds the driver through the bodywork and kills instantly. */
+const DRIVER_HIT_CHANCE = 0.04;
 
 /** A guard has ~half a second to jump clear once the van is bearing down on them. */
 const DODGE_MS = 500;
@@ -78,6 +96,15 @@ const CAR_CAM_SMOOTH = 0.12;
 let van: any = null;
 let active = false;
 let lastNoiseAt = -Infinity;
+/** Bodywork left before the van is wrecked. Only counts down while it is being shot. */
+let carHealth = CAR_MAX_HEALTH;
+
+/**
+ * The stand-in for the van art: a hollow box drawn at the physics body's real size and
+ * angle, so the collision shape and what you see are the same thing. Replaces the
+ * `getawaycar` image (which no longer lines up with the body) until new art exists.
+ */
+let carOutline: any = null;
 
 /** Smoothed camera aim point while driving. */
 const camLead = { x: 0, y: 0 };
@@ -153,21 +180,55 @@ function stopEngine(): void {
 export function initCar(owner: any, angle: number): void {
   van = owner;
   active = false;
-  if (owner.sprite && owner.sprite.anchor) {
-    owner.sprite.anchor.x = 0.5;
-    owner.sprite.anchor.y = 0.5;
-  }
+  carHealth = CAR_MAX_HEALTH;
+  // Hide the mismatched van image; the physics-shaped outline stands in for it.
+  if (owner.sprite) owner.sprite.visible = false;
   physics.addCar(owner, CAR_LENGTH_PX, CAR_WIDTH_PX, angle);
   owner.rad = angle + CAR_ART_OFFSET;
+  buildCarOutline();
+  syncCarOutline(owner.x, owner.y, angle);
   camLead.x = owner.x;
   camLead.y = owner.y;
+}
+
+/**
+ * Draw the van as the box the physics uses: length along the car's forward (+x) axis,
+ * width across it, with a short line out the nose so the facing is obvious. Drawn once in
+ * the box's own coordinates; `syncCarOutline` then just moves and rotates the whole thing.
+ */
+function buildCarOutline(): void {
+  const G = (window as any).PIXI;
+  const layer = (window as any).display_actors;
+  if (!G || !layer) return;
+  if (carOutline && carOutline.parent) carOutline.parent.removeChild(carOutline);
+  const g = new G.Graphics();
+  const hl = CAR_LENGTH_PX / 2;
+  const hw = CAR_WIDTH_PX / 2;
+  g.lineStyle(2, 0xff5252, 0.95);
+  g.drawRect(-hl, -hw, CAR_LENGTH_PX, CAR_WIDTH_PX);
+  // Nose marker: a line from the centre out past the front so "forward" is unambiguous.
+  g.moveTo(0, 0);
+  g.lineTo(hl + 10, 0);
+  layer.addChild(g);
+  carOutline = g;
+}
+
+/** Put the outline over the body at (x, y) turned to `angle` (the body angle, radians). */
+function syncCarOutline(x: number, y: number, angle: number): void {
+  if (!carOutline) return;
+  carOutline.position.x = x;
+  carOutline.position.y = y;
+  carOutline.rotation = angle;
 }
 
 /** Drop all car state between runs. */
 export function resetCarSystem(): void {
   stopEngine();
+  if (carOutline && carOutline.parent) carOutline.parent.removeChild(carOutline);
+  carOutline = null;
   van = null;
   active = false;
+  carHealth = CAR_MAX_HEALTH;
   lastNoiseAt = -Infinity;
   knockbacks.length = 0;
 }
@@ -251,6 +312,47 @@ function exitCar(): void {
   newMessage('Out of the van.');
 }
 
+// --- taking fire ------------------------------------------------------------
+
+/**
+ * A guard's bullet struck the van while the hero was driving it. Two outcomes:
+ *
+ *   - a small `DRIVER_HIT_CHANCE` that the round finds the driver and kills them outright;
+ *   - otherwise the bodywork soaks it, and once `CAR_MAX_HEALTH` such hits land the van is
+ *     wrecked and the driver dies with it.
+ *
+ * `fromX/fromY` is the shooter's position, only used to angle the death splatter. Called
+ * from the bullet loop in main.ts; a no-op unless the hero is actually in the van.
+ */
+export function carHitByBullet(fromX: number, fromY: number): void {
+  if (!active || !van || !hero.alive) return;
+
+  if (Math.random() < DRIVER_HIT_CHANCE) {
+    killDriver(fromX, fromY, 'The driver is hit!');
+    return;
+  }
+
+  carHealth -= 1;
+  if (carHealth <= 0) {
+    killDriver(fromX, fromY, 'The van is wrecked!');
+    return;
+  }
+  newFloatingMessage('Van hit! (' + carHealth + ')', { x: van.x, y: van.y }, '#FFaa00');
+}
+
+/** End the drive with the hero dead at the wheel: cut the engine, show the body, game over. */
+function killDriver(fromX: number, fromY: number, reason: string): void {
+  active = false;
+  hero.inCar = false;
+  stopEngine();
+  // Bring the (now to-be-dead) hero back into view slumped where the van stopped.
+  hero.x = van.x;
+  hero.y = van.y;
+  hero.sprite.visible = true;
+  newFloatingMessage(reason, { x: van.x, y: van.y }, '#cc0000');
+  if (typeof killHero === 'function') killHero(fromX, fromY);
+}
+
 // --- per-step (before the physics step) -------------------------------------
 
 /**
@@ -330,6 +432,7 @@ export function updateCarPostStep(dtMs: number): void {
     van.x = st.x;
     van.y = st.y;
     van.rad = st.angle + CAR_ART_OFFSET;
+    syncCarOutline(st.x, st.y, st.angle);
     if (active) {
       hero.x = st.x;
       hero.y = st.y;
@@ -346,13 +449,18 @@ export function updateCarPostStep(dtMs: number): void {
 
 function resolveCarContacts(st: { vx: number; vy: number; speed: number } | null): void {
   const contacts = physics.drainCarContacts();
+  // Lethality is gated on the van's own driving speed, not the closing speed: a stationary
+  // van can never run anyone over, however fast they walk into it — the collision just
+  // shoves them (Box2D does that on its own). Only a van driving above the threshold kills.
+  const driving = st ? st.speed : 0;
   for (const c of contacts) {
     if (c.kind === 'actor' && c.owner) {
-      const guard = c.owner as any;
-      if (guard.alive && c.speed >= RUN_OVER_SPEED_PX) runOver(guard, st);
+      const unit = c.owner as any;
+      if (unit.alive && driving >= RUN_OVER_SPEED_PX) runOver(unit, st);
     } else if (c.kind === 'cell' && c.cell >= 0 && c.speed >= BREACH_SPEED_PX) {
-      // damageCell filters by material: drywall and brick give way to a car, concrete and
-      // steel (and the map border) shrug it off. Amount scales with the impact.
+      // damageCell filters by material: drywall and brick take car damage, concrete and
+      // steel (and the map border) shrug it off. The amount is capped low (see
+      // BREACH_DAMAGE_MAX) so one impact damages a solid wall but never destroys it.
       const amount = Math.min(c.speed * BREACH_DAMAGE_PER_SPEED, BREACH_DAMAGE_MAX);
       grid.damageCell(c.cell, amount, 'car');
     }

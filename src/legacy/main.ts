@@ -20,6 +20,7 @@ import {
   isInCar,
   updateCarPreStep,
   updateCarPostStep,
+  carHitByBullet,
 } from '../systems/car';
 import { loadMap } from '../map/loader';
 import { DAMAGE_AMOUNT } from '../map/tileset';
@@ -1070,8 +1071,11 @@ function gameloop_bullets(deltaTime){
         var toY = reachedEnd ? bullet.target.y : bullet.y;
 
         //A guard's bullet looks for the hero, the hero's looks for guards. Guards have
-        //never shot each other and Phase 4 is not the phase to start.
+        //never shot each other and Phase 4 is not the phase to start. While the hero is
+        //driving, their body is out of the world and the van (CATEGORY.CAR) is the thing
+        //standing where the hero is — so a guard's shot has to be able to hit the van.
         var mask = CATEGORY.VISION_BLOCKER | (bullet.ignore == hero ? CATEGORY.GUARD : CATEGORY.HERO);
+        if(bullet.ignore != hero && isInCar())mask |= CATEGORY.CAR;
         var hit = physics.bulletHit(fromX,fromY,toX,toY,bullet.ignore,mask);
 
         //A dragged corpse and a security camera have no physics body — a corpse gives up
@@ -1092,7 +1096,12 @@ function gameloop_bullets(deltaTime){
 
         if(hit && hit.owner){
             var victim: any = hit.owner;
-            if(victim === hero){
+            if((hit.category & CATEGORY.CAR) !== 0){
+                //The shot hit the getaway van the hero is driving: bodywork takes the hit,
+                //with a small chance the round finds the driver. Not treated like a guard —
+                //the van has no `kill()` and dying is handled inside carHitByBullet.
+                carHitByBullet(bullet.ignore.x,bullet.ignore.y);
+            }else if(victim === hero){
                 if(hero.alive)hero.hurt(bullet.ignore.x,bullet.ignore.y);
             }else if(victim.alive){
                 var guardDies = true;
