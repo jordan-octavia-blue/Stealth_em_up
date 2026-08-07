@@ -875,10 +875,17 @@ function gameloop_guards(deltaTime){
                     }
                 }else{
                     
-                    //if guard is alarmed rotate to the next waypoint so they peer around corners.
-                    //~guard doesn't see hero so set target_rotate to null so guard can rotate where he moves again
-                    //don't change rotation unless the guard is close to the point (this keeps them from walking backwards [bug])
+                    //Alarmed but the hero is out of sight: the guard should face where it
+                    //is walking. When the next waypoint is close it faces that, so guards
+                    //peer around the corner they are about to turn; otherwise clear
+                    //target_rotate so move_to_target() rotates toward the current heading.
+                    //Clearing it matters: without it target_rotate keeps its last value —
+                    //usually the hero reference from when the guard last had eyes on — so an
+                    //alarmed guard would strafe toward the hero's live position instead of
+                    //looking the way it moves. (The 100px guard keeps a waypoint that is
+                    //beside or behind the guard from making it appear to walk backwards.)
                     if(guard.path[0] && get_distance(guard.x,guard.y,guard.path[0].x,guard.path[0].y) < 100)guard.target_rotate = guard.path[0];
+                    else guard.target_rotate = null;
                 
                     //if alarmed and the hero is out of sight, hand movement to the squad
                     //blackboard (Phase 6b). It steers this guard toward the shared hero belief:
