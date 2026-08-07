@@ -9,10 +9,19 @@ const CS = 64;
 
 // --- the pure top-down car model (roadmap §3.3) -----------------------------
 
-/** A lone dynamic box in an empty world, the way the model sees the car. */
+/**
+ * A lone dynamic box in an empty world, the way the model sees the car. It carries the same
+ * `linearDamping` the real van body is created with, because the coast-down now lives on the
+ * body (not inside `driveCarBody`) — without it the car would coast a hair past its speed cap.
+ */
 function makeCarBody(angle = 0): { world: World; body: Body } {
   const world = new World({ gravity: Vec2(0, 0) });
-  const body = world.createDynamicBody({ position: Vec2(0, 0), angle, allowSleep: false });
+  const body = world.createDynamicBody({
+    position: Vec2(0, 0),
+    angle,
+    linearDamping: DEFAULT_CAR_TUNING.linearDamping,
+    allowSleep: false,
+  });
   body.createFixture(Box(1.7, 0.9), { density: 1 });
   return { world, body };
 }

@@ -305,13 +305,16 @@ export class PhysicsWorld {
       position: Vec2(owner.x / PPM, owner.y / PPM),
       angle: options.angle,
       bullet: true,
+      linearDamping: options.tuning.linearDamping,
       angularDamping: options.tuning.angularDamping,
       allowSleep: false,
     });
     const halfLen = options.length / 2 / PPM;
     const halfWid = options.width / 2 / PPM;
+    // density 3 makes the van ~18 kg — heavy enough that a walking hero can't shove it around
+    // (density 1 was ~6 kg, lighter than a shopping cart). The grip/steer tuning is sized for it.
     const fixture = body.createFixture(Box(halfLen, halfWid), {
-      density: 1,
+      density: 3,
       friction: 0.3,
       restitution: 0.1,
       filterCategoryBits: CATEGORY.CAR,

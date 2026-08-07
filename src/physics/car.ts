@@ -10,16 +10,21 @@
  *
  *  1&2. **Kill sideways velocity.** A real tyre resists sliding: decompose the body's
  *       velocity into forward and sideways parts and cancel the sideways part with an
- *       impulse, *clamped* to a maximum. That clamp is the whole drift feel — a high cap
- *       (`gripLateralImpulse`) means the tyres hold and the car tracks; the handbrake
- *       swaps in a low cap (`handbrakeLateralImpulse`) so the sideways velocity survives
- *       and the back end slides.
+ *       impulse, *clamped* to a maximum. The clamp is expressed as a top sideways *speed*
+ *       (m/s) the tyres can scrub off in one step, and is multiplied by the body's mass
+ *       here so the feel is identical whatever the van weighs. That clamp is the whole
+ *       drift knob — a high cap (`gripLateralVel`) means the tyres hold and the car tracks;
+ *       the handbrake swaps in a low cap (`handbrakeLateralVel`) so the sideways velocity
+ *       survives and the back end slides.
  *  3.   **Drive.** A forward force for throttle/reverse, cut off once the car is already at
  *       its speed cap so the cap is a hard ceiling rather than a slow crawl past it.
  *  4.   **Steer.** An angular impulse scaled by how fast the car is moving (no turning on
  *       the spot) and sign-flipped in reverse (backing up steers like a real car).
  *
- * Plus a mild rolling-resistance drag so the car coasts to a stop when you lift off.
+ * The coast-to-a-stop drag is *not* here: it is the body's `linearDamping`, set when the
+ * van body is created. Keeping it on the body (rather than as a force applied here) means a
+ * parked van you bump into still slows down and stops, even though this function — driver
+ * input — only runs while someone is behind the wheel.
  */
 
 import { Body, Vec2 } from 'planck';
@@ -44,35 +49,38 @@ export interface CarTuning {
   maxSpeed: number;
   /** Reverse speed cap, m/s. */
   maxReverseSpeed: number;
-  /** Sideways-velocity-cancelling impulse cap with the tyres gripping (high = tracks true). */
-  gripLateralImpulse: number;
-  /** The same cap with the handbrake down (low = the back end slides). */
-  handbrakeLateralImpulse: number;
+  /** Top sideways speed (m/s) the gripping tyres scrub off per step (high = tracks true). */
+  gripLateralVel: number;
+  /** The same, with the handbrake down (low = the back end keeps sliding). */
+  handbrakeLateralVel: number;
   /** Angular impulse at full steer, before the speed scaling. */
   steerImpulse: number;
   /** Forward speed (m/s) at which steering reaches full authority. */
   turnSpeedRef: number;
-  /** Linear drag force per unit velocity — the coast-down. */
-  rollingResistance: number;
+  /** Body linear damping — the coast-down, and what stops a parked van after a bump. */
+  linearDamping: number;
   /** Angular damping set on the body so it doesn't spin freely. */
   angularDamping: number;
 }
 
 /**
- * Default van feel. `maxSpeed` 14 m/s ≈ 448 px/s — faster than the hero's 240 px/s walk
- * and just under the 480 px/s sprint, so the getaway is quick without being twitchy. These
- * are the numbers the "drift-feel tuning session" in the roadmap's Verify step turns.
+ * Default van feel. `maxSpeed` 24 m/s ≈ 768 px/s — comfortably past the hero's 480 px/s
+ * sprint, so once you're rolling nothing on foot keeps up. `driveForce` 400 N on the van's
+ * ~18 kg mass (density 3, set in `addCar`) is ~22 m/s² of push, so it reaches that top
+ * speed in about a second. `linearDamping` 0.5 is a gentle coast-down that also stops a
+ * parked van after you walk into it. `steerImpulse` is sized for that heavier body, so the
+ * turn rate matches the old lighter van.
  */
 export const DEFAULT_CAR_TUNING: CarTuning = {
-  driveForce: 150,
-  reverseForce: 80,
-  maxSpeed: 14,
-  maxReverseSpeed: 6,
-  gripLateralImpulse: 30,
-  handbrakeLateralImpulse: 3,
-  steerImpulse: 1.0,
+  driveForce: 400,
+  reverseForce: 220,
+  maxSpeed: 24,
+  maxReverseSpeed: 10,
+  gripLateralVel: 6.0,
+  handbrakeLateralVel: 0.5,
+  steerImpulse: 3.0,
   turnSpeedRef: 3,
-  rollingResistance: 1.5,
+  linearDamping: 0.5,
   angularDamping: 2.5,
 };
 
@@ -92,10 +100,13 @@ export function driveCarBody(body: Body, controls: CarControls, tuning: CarTunin
   const mass = body.getMass();
   const center = body.getWorldCenter();
 
-  // 1 & 2: cancel the sideways component of velocity, clamped — the drift knob.
+  // 1 & 2: cancel the sideways component of velocity, clamped — the drift knob. The clamp
+  // is a top sideways speed (m/s), turned into an impulse cap by the mass, so a heavier van
+  // grips exactly as hard as a light one.
   const lateralSpeed = dot(v, right);
   let impulse = -lateralSpeed * mass;
-  const maxLat = controls.handbrake ? tuning.handbrakeLateralImpulse : tuning.gripLateralImpulse;
+  const maxLatVel = controls.handbrake ? tuning.handbrakeLateralVel : tuning.gripLateralVel;
+  const maxLat = maxLatVel * mass;
   if (impulse > maxLat) impulse = maxLat;
   else if (impulse < -maxLat) impulse = -maxLat;
   body.applyLinearImpulse(Vec2(right.x * impulse, right.y * impulse), center, true);
@@ -117,6 +128,6 @@ export function driveCarBody(body: Body, controls: CarControls, tuning: CarTunin
     body.applyAngularImpulse(controls.steer * tuning.steerImpulse * speedFactor * dir, true);
   }
 
-  // 5: rolling resistance — a drag proportional to velocity, so lifting off coasts to a stop.
-  body.applyForceToCenter(Vec2(-v.x * tuning.rollingResistance, -v.y * tuning.rollingResistance), true);
+  // The coast-down (lifting off) is the body's linearDamping, set in `addCar` — not applied
+  // here, so a parked van you bump into still slows to a stop even when no one is driving.
 }
