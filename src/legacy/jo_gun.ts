@@ -48,7 +48,19 @@ function jo_gun(name,clip_size, silenced, automatic, bullets_per_shot, spread){
             var randomRot = randomIntFromInterval(-this.spread/2,this.spread/2);
             //console.log('random rot: ' + randomRot);
             var endPoint = rotate_point_about_axis({x:unit.x,y:unit.y},randomRot,{x:unit.aim.end.x,y:unit.aim.end.y});
-            //where this shot would stop if nobody were in the way; gameloop_bullets
+            //A bullet keeps flying until it hits something — it must not stop at the point
+            //under the cursor. `aim.end` reaches only as far as the mouse (or the first wall),
+            //so extend the shot's direction well past the map and let sightStop find the wall
+            //it actually runs into. gameloop_bullets raycasts each step, so anyone standing in
+            //the way is still hit before the bullet ever reaches that far wall.
+            var aimDX = endPoint.x - unit.x;
+            var aimDY = endPoint.y - unit.y;
+            var aimLen = Math.sqrt(aimDX*aimDX + aimDY*aimDY);
+            if(aimLen > 0){
+                var BULLET_REACH = 5000;//comfortably beyond the map's diagonal; the border walls stop the ray
+                endPoint = {x: unit.x + aimDX/aimLen*BULLET_REACH, y: unit.y + aimDY/aimLen*BULLET_REACH};
+            }
+            //where this shot stops if nobody is in the way; gameloop_bullets
             //raycasts each step to find out who actually is
             bullet.target = physics.sightStop(unit.x,unit.y,endPoint.x,endPoint.y);
             bullet.rotate_to_instant(bullet.target.x,bullet.target.y);

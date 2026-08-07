@@ -1154,12 +1154,21 @@ function gameloop_doors(deltaTime){
                 tooltip.objY = door_inst.y - 32;
             }
         }
+        //A dragged guard brings their proximity lock along: while you're hauling a guard,
+        //any door they get near opens for you — even a locked one. The door stays locked
+        //(its `unlocked` flag is untouched); it only opens because the guard's lock is in
+        //range, and it closes again once you drag them away. A dead body still carries the
+        //lock, which is why this checks the drag target directly rather than the physics
+        //sensor — a corpse has no body in the world for the sensor to detect.
+        if(hero_drag_target && get_distance(door_center_x,door_center_y,hero_drag_target.x,hero_drag_target.y) <= hero_drag_target.radius*4){
+            door_inst.openerNear = true;
+        }
         if(door_inst.openerNear){
             door_inst.open();
-        
+
         }else{
             door_inst.close();
-        
+
         }
     }
 }
