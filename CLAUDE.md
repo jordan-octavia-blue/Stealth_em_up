@@ -47,15 +47,21 @@ hero worth raising the alarm over:
 | Planting a bomb | `hero.plantingBomb` | During the ~1.5s bomb-plant channel (F key) |
 | Carrying stolen loot | `hero.carry` | Holding the money |
 | Dragging / choking a body | `hero_drag_target` | Dragging a corpse or choking a guard |
+| Just rammed a wall / ran someone over in the van | `hero.vanSuspiciousUntil` | The van hits a wall hard or mows a guard down (`src/systems/car.ts`); a short deadline set by `markVanSuspicious()` |
 
 The mask is protection **until a guard sees your face unmasked** — once a guard sets
 `knowsHerosFace` (`sprite_guard.ts`), the mask no longer hides you from that guard.
 
-**A vehicle is not on this list.** Sitting in or driving the getaway van
-(`hero.inCar`) is deliberately *not* suspicious by itself. Guards react to the van
-only if the hero is doing one of the things above while in it (e.g. driving off with
-the loot, or masked), or once it is driven fast enough to be heard (see below). This
-is intentional: a van is just a van.
+**Calmly driving a vehicle is not on this list; ramming things in it is.** Sitting in
+or gently driving the getaway van (`hero.inCar`) is deliberately *not* suspicious by
+itself — a van is just a van. But the *violent* things a van does are: ramming a wall
+or running a guard over briefly marks the hero suspicious (`hero.vanSuspiciousUntil`,
+a ~2.5s gameClock deadline set from `src/systems/car.ts`). During that window any guard
+or camera that sees the van alarms through the normal detection path — and, if the
+driver is unmasked, learns their face — exactly as for any other suspicious act.
+Guards also react to the van whenever the hero is *already* doing one of the things
+above while in it (e.g. masked, or driving off with the loot), and a fast van is heard
+even when nothing suspicious is happening (see below).
 
 ### How a guard/camera turns a sighting into an alarm
 
