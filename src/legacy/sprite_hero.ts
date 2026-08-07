@@ -54,14 +54,28 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
         this.ability_remote_bomb = false;
         this.ability_body_armor = false;
         
+        //A short-lived flag (a gameClock deadline) that marks the hero suspicious right
+        //after the van does something violent — ramming a wall or running a guard over.
+        //Getting in / calmly driving the van is still NOT suspicious (a van is just a van),
+        //but the *act* of ramming or running someone down is, so any guard or camera that
+        //sees the van during this window alarms — and, if the driver is unmasked, learns
+        //their face — through the exact same detection path as every other suspicious act.
+        //Set via markVanSuspicious() from src/systems/car.ts.
+        this.vanSuspiciousUntil = 0;
+        this.markVanSuspicious = function(durationMs){
+            var until = gameClock.now() + durationMs;
+            if(until > this.vanSuspiciousUntil)this.vanSuspiciousUntil = until;
+        }
+
         //The one predicate every guard and camera checks to decide if the hero is worth
         //raising the alarm over. The hero is suspicious only while doing something a guard
         //would react to: wearing a mask, holding a drawn gun, standing on an off-limits
-        //tile, lockpicking a door, planting a bomb, carrying stolen loot, or dragging a
-        //body. Simply sitting in / driving the van is deliberately NOT on this list — a
+        //tile, lockpicking a door, planting a bomb, carrying stolen loot, dragging a body,
+        //or — for a short window — having just rammed a wall or run someone over in the van.
+        //Simply sitting in / calmly driving the van is deliberately NOT on this list — a
         //van is just a van until the hero does one of these things in or near it.
         this.willCauseAlert = function(){
-            if(this.masked || this.gunOut || this.inOffLimits || this.lockpicking || this.plantingBomb || this.carry !== null || hero_drag_target !== null)return true;
+            if(this.masked || this.gunOut || this.inOffLimits || this.lockpicking || this.plantingBomb || this.carry !== null || hero_drag_target !== null || gameClock.now() < this.vanSuspiciousUntil)return true;
             else return false;
         }
         
