@@ -15,7 +15,14 @@
  *    player's fog are two separate systems in this codebase, so smoke has to touch both.
  *  - **Flash:** blinds every guard and camera inside its radius that it has line of sight
  *    to, by setting `blindUntil` on them (see `jo_sprite.doesSpriteSeeSprite`). A blinded
- *    guard sees nothing and its alarm state cannot change until the blind wears off.
+ *    guard sees nothing and its alarm state cannot change until the blind wears off; the
+ *    guard loop in main.ts also freezes it in place and shows a "dazed" marker while it holds.
+ *
+ * Two things every grenade does on detonation, wired here: a burst of debris particles across
+ * the blast disc (`grenadeBlastParticles`), and alerting guards who *hear* the pop (`beHeard`,
+ * proximity, non-loud grenades only). Guards who *see* a live grenade are handled by putting an
+ * `{x, y}` proxy in `window.alarmingObjects` while the grenade exists, so the normal detection
+ * loop reacts to it exactly as it reacts to a dead body.
  *
  * A thrown grenade is a lerp from the hero to the target point with a faked height (the
  * sprite grows then shrinks) — top-down, so there is no physics body until it lands. On
@@ -29,7 +36,9 @@
 import { gameClock } from '../core/clock';
 import { events } from '../core/events';
 import { physics } from '../physics';
+import { squad } from '../ai/squad';
 import { DAMAGE_AMOUNT } from '../map/tileset';
+import { grenadeBlastParticles } from './particles';
 import { throwableDef, ThrowableDef } from './weapons';
 
 export interface Vec {
@@ -50,6 +59,14 @@ const ARC_HEIGHT = 0.5;
  * neighbours overlap and no sight ray threads between two of them.
  */
 const CLOUD_CIRCLE_RADIUS_FACTOR = 0.72;
+/**
+ * How far a *non-loud* grenade (smoke, flash) is heard, per point of its `loudness`
+ * (0-10). A guard within `loudness * this` pixels of the blast — no line of sight needed —
+ * hears the pop and comes to investigate. Frag skips this: it is `loud`, so it wakes the
+ * whole floor through `alert_all_guards()` instead. (loudness 2 smoke ≈ 160px ≈ 2.5 cells;
+ * loudness 6 flash ≈ 480px ≈ 7.5 cells.)
+ */
+const HEAR_PX_PER_LOUDNESS = 80;
 
 const dist = (a: Vec, b: Vec): number => Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
@@ -149,6 +166,12 @@ interface Grenade {
   smokeCells: number[];
   /** Smoke cloud graphics, or null. */
   cloudFx: any | null;
+  /**
+   * The `{x, y}` proxy this grenade puts in `window.alarmingObjects` so guards and cameras
+   * that *see* it (in flight or lying on the ground) react through the normal detection
+   * loop — exactly the way they react to a dead body. Removed when the grenade is done.
+   */
+  sighting: Vec | null;
 }
 
 const grenades: Grenade[] = [];
@@ -198,7 +221,7 @@ export function throwGrenade(typeId: string, target: Vec): boolean {
   if (!def) return false;
   const hero = W().hero;
   const start: Vec = hero ? { x: hero.x, y: hero.y } : { x: target.x, y: target.y };
-  grenades.push({
+  const g: Grenade = {
     def,
     start,
     target: { x: target.x, y: target.y },
@@ -211,8 +234,40 @@ export function throwGrenade(typeId: string, target: Vec): boolean {
     smokeId: -1,
     smokeCells: [],
     cloudFx: null,
-  });
+    sighting: null,
+  };
+  registerSighting(g, start);
+  grenades.push(g);
   return true;
+}
+
+/**
+ * Put (or move) this grenade's `{x, y}` proxy in `window.alarmingObjects` so any guard or
+ * camera with line of sight to it reacts through the same per-frame loop that reacts to a
+ * dead body — this is the "guards get alerted when they *see* a grenade" half. A live
+ * grenade is a visible object on the floor; seeing one is alarming.
+ */
+function registerSighting(g: Grenade, at: Vec): void {
+  const objs = W().alarmingObjects;
+  if (!Array.isArray(objs)) return;
+  if (!g.sighting) {
+    g.sighting = { x: at.x, y: at.y };
+    objs.push(g.sighting);
+  } else {
+    g.sighting.x = at.x;
+    g.sighting.y = at.y;
+  }
+}
+
+/** Remove this grenade's sighting proxy from `window.alarmingObjects`, if it added one. */
+function unregisterSighting(g: Grenade): void {
+  if (!g.sighting) return;
+  const objs = W().alarmingObjects;
+  if (Array.isArray(objs)) {
+    const i = objs.indexOf(g.sighting);
+    if (i >= 0) objs.splice(i, 1);
+  }
+  g.sighting = null;
 }
 
 /** Advance every in-flight grenade / active cloud by `dtMs`. Call once per game step. */
@@ -221,6 +276,7 @@ export function updateGrenades(dtMs: number): void {
     const g = grenades[i];
     stepGrenade(g, dtMs);
     if (g.phase === 'done') {
+      unregisterSighting(g);
       grenades.splice(i, 1);
       i--;
     }
@@ -232,6 +288,7 @@ export function resetGrenades(): void {
   for (const g of grenades) {
     tearDownSmoke(g);
     destroySprite(g.sprite);
+    unregisterSighting(g);
   }
   grenades.length = 0;
 }
@@ -249,6 +306,8 @@ function stepGrenade(g: Grenade, dtMs: number): void {
       g.sprite.sprite.rotation = (g.sprite.sprite.rotation ?? 0) + 0.3;
       g.sprite.prepare_for_draw();
     }
+    // Keep the "guards can see it" proxy on the grenade as it flies.
+    registerSighting(g, p);
     if (t >= 1) g.phase = 'fuse';
     return;
   }
@@ -286,9 +345,57 @@ function detonate(g: Grenade): void {
   const center = g.target;
   const effects = g.def.effects;
   if (effects.includes('damage') || effects.includes('breach')) detonateFrag(g, center);
-  if (effects.includes('loud')) beLoud(center);
   if (effects.includes('vision_block')) deploySmoke(g, center);
+  // Blind must run before the "heard" alert below, so a guard this flash just blinded is
+  // skipped by beHeard (it is dazed — it hears nothing useful).
   if (effects.includes('blind')) detonateFlash(g, center);
+
+  // Noise on detonation — the "hear a grenade" half. Frag is `loud`: it wakes the whole
+  // floor (`alert_all_guards`, as the planted bomb does). Everything else makes a smaller
+  // pop only nearby guards hear.
+  if (effects.includes('loud')) beLoud(center);
+  else beHeard(g, center);
+
+  // A burst of debris across the blast disc, tinted per type (Phase 8).
+  grenadeBlastParticles(center, g.def.radius, tintFor(g.def.id));
+}
+
+/**
+ * The "hear a non-loud grenade" alert: every living guard within `loudness * HEAR_PX...`
+ * of the blast — no line of sight required — becomes alarmed and investigates the spot,
+ * through the same `seeAlarmingObject`/squad-belief path a sighting uses. Guards this same
+ * blast just blinded are skipped: a flashbanged guard is dazed and reacts to nothing until
+ * it recovers.
+ */
+function beHeard(g: Grenade, center: Vec): void {
+  const w = W();
+  const radius = g.def.loudness * HEAR_PX_PER_LOUDNESS;
+  if (radius <= 0) return;
+  const now = gameClock.now();
+  const guards = w.guards ?? [];
+  let anyHeard = false;
+  for (const guard of guards) {
+    if (!guard.alive || guard.being_choked_out) continue;
+    if (guard.blindUntil && now < guard.blindUntil) continue;
+    if (dist(center, guard) <= radius) {
+      guard.sawHeroLastAt = { x: center.x, y: center.y };
+      guard.seeAlarmingObject(center);
+      anyHeard = true;
+    }
+  }
+  if (anyHeard) {
+    // Point the squad — including guards already alarmed — at the noise.
+    squad.updateBelief(center.x, center.y, now);
+    if (w.hero) {
+      w.hero.lastSeenX = center.x;
+      w.hero.lastSeenY = center.y;
+    }
+    if (w.hero_last_seen) {
+      w.hero_last_seen.x = center.x;
+      w.hero_last_seen.y = center.y;
+    }
+    w.notifyGuardsOfHeroLocation = true;
+  }
 }
 
 // --- frag -------------------------------------------------------------------
@@ -345,6 +452,9 @@ function beLoud(center: Vec): void {
     w.hero_last_seen.y = center.y;
   }
   w.notifyGuardsOfHeroLocation = true;
+  // The blast is where the squad now believes the hero is, so alarmed guards converge on
+  // it (a distraction lure) — the same thing the planted bomb does in explodeBomb().
+  squad.updateBelief(center.x, center.y, gameClock.now());
 }
 
 // --- smoke ------------------------------------------------------------------

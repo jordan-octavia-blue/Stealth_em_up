@@ -776,10 +776,53 @@ function reactionTimeout(){
     if(this.doesSpriteSeeSprite(hero))this.can_shoot = true;
     this.reacting = false;
 }
+//Draw/update/remove the "dazed" marker over a flashbanged guard (Phase 8): three little
+//stars orbiting the guard's head while its `blindUntil` is in the future. Created lazily on
+//the guard as `blindFx`, positioned each frame, and torn down the moment the blind ends (or
+//the guard dies) so nothing lingers.
+function updateGuardBlindFx(guard){
+    var blinded = guard.alive && guard.blindUntil && gameClock.now() < guard.blindUntil;
+    if(blinded){
+        if(!guard.blindFx){
+            guard.blindFx = new PIXI.Graphics();
+            guard.blindFxAngle = 0;
+            display_effects.addChild(guard.blindFx);
+        }
+        guard.blindFxAngle += 0.18;
+        var g = guard.blindFx;
+        g.clear();
+        var R = 20;
+        for(var k = 0; k < 3; k++){
+            var a = guard.blindFxAngle + k*(Math.PI*2/3);
+            g.beginFill(0xffee44, 0.95);
+            //a vertically-squashed orbit reads as "stars circling the head" from top-down
+            g.drawCircle(Math.cos(a)*R, Math.sin(a)*R*0.5, 4);
+            g.endFill();
+        }
+        g.x = guard.x;
+        g.y = guard.y - 26;
+    }else if(guard.blindFx){
+        if(guard.blindFx.parent)guard.blindFx.parent.removeChild(guard.blindFx);
+        guard.blindFx = null;
+    }
+}
 function gameloop_guards(deltaTime){
     for(var i = 0; i < guards.length; i++){
         var guard = guards[i];
+        //Flashbanged (Phase 8): a guard blinded by a flash is dazed. It can't see, so it
+        //stops where it stands until the blind wears off, and shows a spinning "stars"
+        //marker so the player can tell it's been taken out of the fight. This runs for dead
+        //guards too, only to clear a marker on one killed mid-blind.
+        updateGuardBlindFx(guard);
         if(guard.alive){
+            //A blinded guard freezes: skip its whole AI/movement for this frame and keep its
+            //body still. We must NOT clear guard.moving here — a patrolling guard uses that
+            //flag to ask for its next route, so zeroing it would strand the guard once the
+            //blind ended. Stopping the physics body each frame is enough to hold it in place.
+            if(guard.blindUntil && gameClock.now() < guard.blindUntil){
+                if(physics.hasActor(guard))physics.stop(guard);
+                continue;
+            }
             //Dodging the van (Phase 7): for the ~0.5s override, the guard ignores its normal
             //AI and just scrambles toward the sidestep target the car system set.
             if(guard.dodgeUntil && gameClock.now() < guard.dodgeUntil){
@@ -1014,8 +1057,10 @@ function gameloop_security_cams(deltaTime){
         var cam = security_cameras[i];
         
         if(!cameras_disabled && cam.alive){
-            cam.swivel(deltaTime);
-            
+            //A flashbanged camera stops swivelling while it's blinded (Phase 8) — it can't
+            //see anyway, and a frozen camera reads as "knocked out" the way a frozen guard does.
+            if(!(cam.blindUntil && gameClock.now() < cam.blindUntil))cam.swivel(deltaTime);
+
             
             //if security_cameras are not already alarmed
             if(!cam.alarmed){

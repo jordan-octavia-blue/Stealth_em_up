@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   cloudFootprint,
   computeThrowMs,
+  resetGrenades,
   targetsInRadiusWithLOS,
   throwArcPosition,
+  throwGrenade,
+  updateGrenades,
   GrenadeGridLike,
 } from '../../src/systems/grenades';
+import { gameClock } from '../../src/core/clock';
 
 const CS = 64;
 
@@ -92,5 +96,74 @@ describe('radial line-of-sight filter (flash / frag targeting)', () => {
     const canSee = (_x0: number, _y0: number, x1: number, _y1: number): boolean => x1 !== 40;
     const hit = targetsInRadiusWithLOS(center, 100, targets, canSee).map((t) => t.id);
     expect(hit).toEqual(['near_visible']); // blocked one dropped, far one out of range
+  });
+});
+
+/**
+ * The alerting wiring runs against the same `window` globals the game uses; the test
+ * `setup.ts` points `window` at `globalThis`, so we can stand in fakes for `hero`,
+ * `guards`, and `alarmingObjects`. No Pixi/grid is set, so the render + wall-damage code
+ * paths self-skip and only the AI-facing behaviour runs.
+ */
+function fakeGuard(x: number, y: number): any {
+  return {
+    x,
+    y,
+    alive: true,
+    being_choked_out: false,
+    blindUntil: 0,
+    sawHeroLastAt: { x: null, y: null },
+    heard: false,
+    seeAlarmingObject() {
+      this.heard = true;
+    },
+  };
+}
+
+describe('guards see a grenade (alarmingObjects proxy)', () => {
+  it('adds a proxy while the grenade exists and removes it when it is gone', () => {
+    const w = globalThis as any;
+    w.alarmingObjects = [];
+    w.hero = { x: 0, y: 0 };
+    w.guards = [];
+    resetGrenades();
+
+    expect(throwGrenade('frag', { x: 100, y: 0 })).toBe(true);
+    // one visible object, sitting at the hero's hand as the throw begins
+    expect(w.alarmingObjects.length).toBe(1);
+    expect(w.alarmingObjects[0]).toMatchObject({ x: 0, y: 0 });
+
+    // in flight, the proxy tracks the grenade toward its target
+    updateGrenades(300);
+    expect(w.alarmingObjects[0].x).toBeGreaterThan(0);
+
+    // fuse burns down, it detonates, the proxy is cleaned up
+    updateGrenades(2000);
+    expect(w.alarmingObjects.length).toBe(0);
+  });
+});
+
+describe('guards hear a grenade (proximity alert)', () => {
+  it('alerts living guards within earshot of a smoke pop, skipping blinded ones', () => {
+    const w = globalThis as any;
+    w.alarmingObjects = [];
+    w.hero = { x: 0, y: 0 };
+    // smoke: loudness 2 -> heard within 2 * 80 = 160px of the blast at (100, 0)
+    const near = fakeGuard(120, 0); // 20px away — hears it
+    const far = fakeGuard(400, 0); // 300px away — too far
+    const blinded = fakeGuard(120, 10); // in range but dazed by an earlier flash
+    blinded.blindUntil = gameClock.now() + 100000;
+    w.guards = [near, far, blinded];
+    resetGrenades();
+
+    throwGrenade('smoke', { x: 100, y: 0 });
+    // fly, then fuse + detonate
+    updateGrenades(300);
+    updateGrenades(800);
+
+    expect(near.heard).toBe(true);
+    expect(far.heard).toBe(false);
+    expect(blinded.heard).toBe(false);
+    expect(near.sawHeroLastAt).toMatchObject({ x: 100, y: 0 });
   });
 });

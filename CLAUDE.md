@@ -117,7 +117,26 @@ then a short fuse runs, then its effect fires. All of this lives in `src/systems
   that it has line of sight to. While it holds, `jo_sprite.doesSpriteSeeSprite` returns false
   for that unit — so it sees nothing and its alarm state cannot change (awareness frozen).
   This is deliberately **independent of `willCauseAlert()`**: a flash blinds a guard whatever
-  the hero is or isn't doing.
+  the hero is or isn't doing. While blinded, a guard also **stops where it stands** and shows a
+  spinning "dazed stars" marker above it (`updateGuardBlindFx` in `src/legacy/main.ts` freezes
+  its AI/movement for those frames without clearing `moving`, so it resumes its route when the
+  blind ends), and a blinded camera **stops swivelling**.
+
+### Grenade blast particles and "guards notice grenades"
+
+- Every grenade throws a burst of small tinted debris across its whole blast disc on
+  detonation (`grenadeBlastParticles` in `src/systems/particles.ts`, tinted per type). It reuses
+  the existing shard tick loop, so the particles bounce off walls and fade like wall shards.
+- Guards and cameras get alerted two ways, both reusing the normal detection path:
+  - **See:** while a grenade is in the air or lying on the floor, it puts a lightweight
+    `{x, y}` proxy in `window.alarmingObjects` (the same list a dead body goes in), so any
+    guard/camera with line of sight to it reacts through `seeAlarmingObject()`. The proxy tracks
+    the grenade's position and is removed when it is gone. (A smoke cloud blocks sight, so it
+    tends to hide its own canister once it deploys.)
+  - **Hear:** on detonation a *non-loud* grenade (smoke, flash) alerts every living guard within
+    `loudness * 80` px — no line of sight — and points the squad at the spot (`beHeard` in
+    `src/systems/grenades.ts`). Guards this same flash just blinded are skipped. Frag skips this
+    path because it is `loud`: it wakes the whole floor via `alert_all_guards()` instead.
 
 ### Key files
 
