@@ -58,15 +58,18 @@ function circularProgressBar(posx,posy,size,lineWidth){
         this.timePassedSinceStart = 0;
         this.percent = 0;
         this.callback = null;
-        
+        //a cancelled channel is no longer planting a bomb, so drop the suspicion flag
+        if(hero.plantingBomb)hero.plantingBomb = false;
     }
     
     this.targetFollow;
     this.paramForCallback;//pass param to callback
     this.heroMaskProg = function(timeToFinish,callback,param){
+        //starting a different channel (masking) supersedes any bomb plant in progress
+        if(hero.plantingBomb)hero.plantingBomb = false;
         //clear distanceCancelTarget
         this.distanceCancelTarget = null;//set null from the last one
-        
+
         this.targetFollow = hero;
         //set timetofinish:
         this.timePassedSinceStart = 0;
@@ -83,6 +86,9 @@ function circularProgressBar(posx,posy,size,lineWidth){
         
     }
     this.reset = function(posx,posy,timeToFinish,callback){
+        //starting a fresh channel clears any leftover bomb-plant flag; the plant path re-raises
+        //it right after this call, so a real plant still marks the hero suspicious.
+        if(hero.plantingBomb)hero.plantingBomb = false;
         //clear distanceCancelTarget
         this.distanceCancelTarget = null;
         //clear follow

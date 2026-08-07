@@ -14,6 +14,9 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         this.alarmedPre = false;
         this.alarmed = false;
         this.being_choked_out = false;
+        //gameClock time (ms) until which this guard is diving clear of the van (Phase 7).
+        //While it holds, the guard ignores its normal AI and runs to `target`.
+        this.dodgeUntil = 0;
         this.blood_trail;
         this.blood_trail_size = 10;
         this.blood_trail_skip_frequency = 1.5;

@@ -203,6 +203,9 @@ declare global {
   var getMapInfo: any;
   var getUrlVars: any;
   var getawaycar: any;
+  var escape_zone: any;
+  var escape_zone_sprite: any;
+  var hasWon: any;
   var grid: any;
   var grid_height: any;
   var grid_width: any;
