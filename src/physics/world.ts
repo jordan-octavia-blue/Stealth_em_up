@@ -32,7 +32,11 @@ import {
   TRIGGER_MASK,
   VELOCITY_ITERATIONS,
 } from './constants';
-import { CarControls, CarTuning, driveCarBody } from './car';
+import { CarControls, CarSteering, CarTuning, driveCarBody } from './car';
+import { PHYSICS_STEP_S } from './constants';
+
+/** What an unmanned car "drives" with: nothing — but the tyres and brakes still exist. */
+const IDLE_CONTROLS: CarControls = { throttle: 0, steer: 0, handbrake: false };
 
 /** The shape of the legacy `jo_grid` this module reads. Structural on purpose. */
 export interface PhysicsGridLike {
@@ -97,10 +101,15 @@ interface ActorRecord {
   radius: number;
 }
 
-interface CarRecord {
+interface CarRecord extends CarSteering {
   body: Body;
   fixture: Fixture;
   tuning: CarTuning;
+  /** Current front-wheel angle, radians — the model's one piece of state (CarSteering). */
+  steer: number;
+  /** Set by `driveCar`; cleared each step. An undriven car still gets the model with
+   *  zero controls, so its tyre grip and engine braking never switch off. */
+  driven: boolean;
 }
 
 /** Where the car's whole world state is handed back in pixel space, angle in radians. */
@@ -114,6 +123,8 @@ export interface CarState {
   vy: number;
   /** Speed, pixels/second. */
   speed: number;
+  /** Front-wheel angle relative to the body, radians (0 = straight, + = right). */
+  steer: number;
 }
 
 /**
@@ -216,6 +227,13 @@ export class PhysicsWorld {
   /** Advance the simulation by one fixed step (seconds). */
   step(dtSeconds: number): void {
     this.flushDestroys();
+    // A car nobody drove this step still runs the car model, with zero input: its tyres
+    // scrub off sideways velocity and the engine brake stops it rolling. This is what
+    // makes a parked two-tonne van something a pedestrian can push *against*, not around.
+    for (const record of this.cars.values()) {
+      if (!record.driven) driveCarBody(record.body, IDLE_CONTROLS, record.tuning, record, dtSeconds);
+      record.driven = false;
+    }
     this.world.step(dtSeconds, VELOCITY_ITERATIONS, POSITION_ITERATIONS);
   }
 
@@ -311,17 +329,18 @@ export class PhysicsWorld {
     });
     const halfLen = options.length / 2 / PPM;
     const halfWid = options.width / 2 / PPM;
-    // density 3 makes the van ~18 kg — heavy enough that a walking hero can't shove it around
-    // (density 1 was ~6 kg, lighter than a shopping cart). The grip/steer tuning is sized for it.
+    // The tuning's density puts the van near a real vehicle's ~1.8 tonnes. The car model
+    // never notices (it works in accelerations), but collisions do: a 0.6 kg walking hero
+    // pushing on it moves it by micrometres, which the always-on tyre grip then scrubs off.
     const fixture = body.createFixture(Box(halfLen, halfWid), {
-      density: 3,
+      density: options.tuning.density,
       friction: 0.3,
       restitution: 0.1,
       filterCategoryBits: CATEGORY.CAR,
       filterMaskBits: ACTOR_MASK,
     });
     fixture.setUserData({ kind: 'car', cell: -1, owner } satisfies FixtureData);
-    this.cars.set(owner, { body, fixture, tuning: options.tuning });
+    this.cars.set(owner, { body, fixture, tuning: options.tuning, steer: 0, driven: false });
   }
 
   removeCar(owner: ActorOwner): void {
@@ -335,11 +354,12 @@ export class PhysicsWorld {
     return this.cars.has(owner);
   }
 
-  /** Apply one step of the top-down car model. Call before `step()`. */
+  /** Apply one step of the car model with the driver's input. Call before `step()`. */
   driveCar(owner: ActorOwner, controls: CarControls): void {
     const record = this.cars.get(owner);
     if (!record) return;
-    driveCarBody(record.body, controls, record.tuning);
+    driveCarBody(record.body, controls, record.tuning, record, PHYSICS_STEP_S);
+    record.driven = true;
   }
 
   /** The car's position (px), angle (rad) and velocity (px/s), or null if it has no body. */
@@ -357,6 +377,7 @@ export class PhysicsWorld {
       vx,
       vy,
       speed: Math.sqrt(vx * vx + vy * vy),
+      steer: record.steer,
     };
   }
 
@@ -367,6 +388,7 @@ export class PhysicsWorld {
     record.body.setTransform(Vec2(x / PPM, y / PPM), angle);
     record.body.setLinearVelocity(Vec2(0, 0));
     record.body.setAngularVelocity(0);
+    record.steer = 0;
     owner.x = x;
     owner.y = y;
   }

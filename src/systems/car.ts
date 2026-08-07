@@ -17,7 +17,7 @@
  */
 
 import { gameClock } from '../core/clock';
-import { physics } from '../physics';
+import { DEFAULT_CAR_TUNING, physics, PPM } from '../physics';
 import { bloodParticleSplatter } from './particles';
 
 // --- tuning -----------------------------------------------------------------
@@ -33,6 +33,16 @@ const CAR_WIDTH_PX = 58;
  * it looked as a static prop.
  */
 const CAR_ART_OFFSET = Math.PI / 2;
+
+/** Debug-outline wheels: drawn at the physics model's real axle positions. */
+const WHEEL_LENGTH_PX = 18;
+const WHEEL_WIDTH_PX = 7;
+/** Front/rear axle distance from the body centre, from the model's wheelbase. */
+const AXLE_X_PX = (DEFAULT_CAR_TUNING.wheelbase * PPM) / 2;
+/** How far each wheel sits out from the centre-line. */
+const AXLE_Y_PX = CAR_WIDTH_PX / 2 - 6;
+/** The van's top speed in px/s, for the engine-pitch ratio. */
+const CAR_MAX_SPEED_PX = DEFAULT_CAR_TUNING.maxSpeed * PPM;
 
 /** How close (px, centre to centre) the hero must be to the van to climb in. */
 const ENTER_DISTANCE_PX = 96;
@@ -105,6 +115,8 @@ let carHealth = CAR_MAX_HEALTH;
  * `getawaycar` image (which no longer lines up with the body) until new art exists.
  */
 let carOutline: any = null;
+/** The two front-wheel graphics, children of `carOutline`, rotated by the live steer angle. */
+let frontWheels: any[] = [];
 
 /** Smoothed camera aim point while driving. */
 const camLead = { x: 0, y: 0 };
@@ -186,21 +198,24 @@ export function initCar(owner: any, angle: number): void {
   physics.addCar(owner, CAR_LENGTH_PX, CAR_WIDTH_PX, angle);
   owner.rad = angle + CAR_ART_OFFSET;
   buildCarOutline();
-  syncCarOutline(owner.x, owner.y, angle);
+  syncCarOutline(owner.x, owner.y, angle, 0);
   camLead.x = owner.x;
   camLead.y = owner.y;
 }
 
 /**
  * Draw the van as the box the physics uses: length along the car's forward (+x) axis,
- * width across it, with a short line out the nose so the facing is obvious. Drawn once in
- * the box's own coordinates; `syncCarOutline` then just moves and rotates the whole thing.
+ * width across it, with a short line out the nose so the facing is obvious, plus the
+ * four wheels at the model's real axle positions. The rear wheels are part of the box
+ * drawing; the front pair are child graphics that `syncCarOutline` rotates every frame
+ * to the model's actual steering angle — so you can *see* how far you're steering.
  */
 function buildCarOutline(): void {
   const G = (window as any).PIXI;
   const layer = (window as any).display_actors;
   if (!G || !layer) return;
   if (carOutline && carOutline.parent) carOutline.parent.removeChild(carOutline);
+  frontWheels = [];
   const g = new G.Graphics();
   const hl = CAR_LENGTH_PX / 2;
   const hw = CAR_WIDTH_PX / 2;
@@ -209,16 +224,36 @@ function buildCarOutline(): void {
   // Nose marker: a line from the centre out past the front so "forward" is unambiguous.
   g.moveTo(0, 0);
   g.lineTo(hl + 10, 0);
+  // Rear wheels: fixed to the body.
+  g.lineStyle(2, 0xbbbbbb, 0.9);
+  for (const side of [-1, 1]) {
+    g.drawRect(
+      -AXLE_X_PX - WHEEL_LENGTH_PX / 2,
+      side * AXLE_Y_PX - WHEEL_WIDTH_PX / 2,
+      WHEEL_LENGTH_PX,
+      WHEEL_WIDTH_PX,
+    );
+  }
+  // Front wheels: their own graphics so they can pivot on their axle to the steer angle.
+  for (const side of [-1, 1]) {
+    const w = new G.Graphics();
+    w.lineStyle(2, 0xffee58, 0.95);
+    w.drawRect(-WHEEL_LENGTH_PX / 2, -WHEEL_WIDTH_PX / 2, WHEEL_LENGTH_PX, WHEEL_WIDTH_PX);
+    w.position.set(AXLE_X_PX, side * AXLE_Y_PX);
+    g.addChild(w);
+    frontWheels.push(w);
+  }
   layer.addChild(g);
   carOutline = g;
 }
 
-/** Put the outline over the body at (x, y) turned to `angle` (the body angle, radians). */
-function syncCarOutline(x: number, y: number, angle: number): void {
+/** Put the outline over the body at (x, y) turned to `angle`, front wheels at `steer`. */
+function syncCarOutline(x: number, y: number, angle: number, steer: number): void {
   if (!carOutline) return;
   carOutline.position.x = x;
   carOutline.position.y = y;
   carOutline.rotation = angle;
+  for (const w of frontWheels) w.rotation = steer;
 }
 
 /** Drop all car state between runs. */
@@ -226,6 +261,7 @@ export function resetCarSystem(): void {
   stopEngine();
   if (carOutline && carOutline.parent) carOutline.parent.removeChild(carOutline);
   carOutline = null;
+  frontWheels = [];
   van = null;
   active = false;
   carHealth = CAR_MAX_HEALTH;
@@ -432,11 +468,11 @@ export function updateCarPostStep(dtMs: number): void {
     van.x = st.x;
     van.y = st.y;
     van.rad = st.angle + CAR_ART_OFFSET;
-    syncCarOutline(st.x, st.y, st.angle);
+    syncCarOutline(st.x, st.y, st.angle, st.steer);
     if (active) {
       hero.x = st.x;
       hero.y = st.y;
-      const ratio = Math.min(st.speed / (14 * 32), 1); // maxSpeed in px/s = 14 m/s * PPM
+      const ratio = Math.min(st.speed / CAR_MAX_SPEED_PX, 1);
       updateEngine(ratio);
       camLead.x += (st.x + st.vx * CAR_LOOKAHEAD_S - camLead.x) * CAR_CAM_SMOOTH;
       camLead.y += (st.y + st.vy * CAR_LOOKAHEAD_S - camLead.y) * CAR_CAM_SMOOTH;
