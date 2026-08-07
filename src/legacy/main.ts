@@ -24,6 +24,7 @@ import {
 } from '../systems/car';
 import { loadMap } from '../map/loader';
 import { DAMAGE_AMOUNT } from '../map/tileset';
+import { updateGrenades, resetGrenades } from '../systems/grenades';
 // Side-effect import: wires the breach FX + AI listeners onto `cell:destroyed` (roadmap
 // §6.2 pipeline steps 6-7). No exported symbols; importing it once is the whole point.
 import '../systems/breach';
@@ -358,6 +359,10 @@ function clearStage(){
     nav.reset();
     physics.reset();
     resetCarSystem();
+    //Grenades (Phase 8): drop any in-flight throwables and tear down active smoke clouds
+    //before physics.reset()/the new grid arrive, so no stale vision-blocker or cell flag
+    //survives into the next run.
+    resetGrenades();
     hasWon = false;
     resetNavDebug();
     resetPhysicsDebug();
@@ -1570,7 +1575,11 @@ function gameloop(deltaTime){
     gameloop_bullets(deltaTime);
 
     gameloop_bomb(deltaTime);
-    
+
+    //Grenades (Phase 8): advance thrown frags/smoke/flash and any lingering smoke cloud.
+    //Runs after the physics step so it can freely add/remove smoke's vision-blocker bodies.
+    updateGrenades(deltaTime);
+
     gameloop_getawaycar_and_loot(deltaTime);
 
     gameloop_doors(deltaTime);

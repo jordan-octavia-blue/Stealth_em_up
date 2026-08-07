@@ -1,0 +1,43 @@
+{
+  "_comment": "Data-driven weapon + throwable table (roadmap §8.2, Phase 8). Guns and grenades share one table. `damage` is nominal only: the game still kills in one shot (guards have no hp — Phase 6a's health model was skipped), so damage is carried as data, not yet subtracted from a hitpoint pool. `loudness` is a 0-10 hint for how alarming a use is. Grenades add: fuseMs (delay from landing to effect), radius (px), and effects (which detonation behaviours run).",
+
+  "guns": [
+    { "id": "shotgun", "name": "Shotgun", "damage": 100, "loudness": 9, "clip": 6, "silenced": false, "automatic": false, "bulletsPerShot": 8, "spread": 30 },
+    { "id": "shotgun_sawed_off", "name": "Sawed-Off Shotty", "damage": 100, "loudness": 9, "clip": 6, "silenced": false, "automatic": false, "bulletsPerShot": 8, "spread": 90 },
+    { "id": "pistol", "name": "Handgun", "damage": 100, "loudness": 8, "clip": 8, "silenced": false, "automatic": false, "bulletsPerShot": 1, "spread": 0 },
+    { "id": "pistol_silenced", "name": "Silenced Handgun", "damage": 100, "loudness": 2, "clip": 8, "silenced": true, "automatic": false, "bulletsPerShot": 1, "spread": 0 },
+    { "id": "machine_gun", "name": "Machine Gun", "damage": 100, "loudness": 9, "clip": 600, "silenced": false, "automatic": true, "bulletsPerShot": 1, "spread": 3 }
+  ],
+
+  "throwables": [
+    {
+      "id": "frag",
+      "name": "Frag Grenade",
+      "damage": 100,
+      "loudness": 10,
+      "fuseMs": 1200,
+      "radius": 150,
+      "effects": ["damage", "breach", "loud"]
+    },
+    {
+      "id": "smoke",
+      "name": "Smoke Grenade",
+      "damage": 0,
+      "loudness": 2,
+      "fuseMs": 500,
+      "radius": 120,
+      "durationMs": 8000,
+      "effects": ["vision_block"]
+    },
+    {
+      "id": "flash",
+      "name": "Flashbang",
+      "damage": 0,
+      "loudness": 6,
+      "fuseMs": 900,
+      "radius": 240,
+      "blindMs": 4000,
+      "effects": ["blind"]
+    }
+  ]
+}
