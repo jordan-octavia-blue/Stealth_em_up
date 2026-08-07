@@ -124,17 +124,22 @@ export function addKeyHandlers(){
                     if(hero.ability_remote_bomb){
                         //remote bomb
                         hero.moving = false;
+                        //planting is a suspicious act for the ~1.5s it takes: reset() clears any
+                        //stale flag, we raise it now, the callback drops it when the plant finishes.
                         circProgBar.reset(hero.x,hero.y,1500,function(){
+                            hero.plantingBomb = false;
                             plantBomb();
                             bomb_tooltip.text = ("Press 'f' to detonate");
                         });
+                        hero.plantingBomb = true;
                         bombs_left--;
                     }else if(hero.ability_timed_bomb){
                         //timed bomb
                         //if f isn't already pressed and bomb isn't already set
                         if(bombs_left>0){
                             hero.moving = false;
-                            circProgBar.reset(hero.x,hero.y,1500,function(){plantBomb();setBomb(5000);});
+                            circProgBar.reset(hero.x,hero.y,1500,function(){hero.plantingBomb=false;plantBomb();setBomb(5000);});
+                            hero.plantingBomb = true;
                             bombs_left--;
                         }else{
                             newFloatingMessage("No Bombs Left",{x:hero.x,y:hero.y},"#FFaa00");

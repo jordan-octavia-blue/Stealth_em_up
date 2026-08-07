@@ -19,7 +19,8 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
         this.gunOut = false;
         this.inOffLimits = false;
         this.lockpicking = false;
-        this.inCar = false;//true while driving the van (Phase 7) — a loud, obvious threat
+        this.plantingBomb = false;//true during the ~1.5s bomb-planting animation
+        this.inCar = false;//true while driving the van (Phase 7). NOT suspicious by itself — a van is just a van.
         this.carry = null;
         this.spyglass_distance = 64;
         this.spyglass_equipped = false;
@@ -53,8 +54,14 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
         this.ability_remote_bomb = false;
         this.ability_body_armor = false;
         
+        //The one predicate every guard and camera checks to decide if the hero is worth
+        //raising the alarm over. The hero is suspicious only while doing something a guard
+        //would react to: wearing a mask, holding a drawn gun, standing on an off-limits
+        //tile, lockpicking a door, planting a bomb, carrying stolen loot, or dragging a
+        //body. Simply sitting in / driving the van is deliberately NOT on this list — a
+        //van is just a van until the hero does one of these things in or near it.
         this.willCauseAlert = function(){
-            if(this.masked || this.gunOut || this.inOffLimits || this.lockpicking || this.inCar || this.carry !== null || hero_drag_target !== null)return true;
+            if(this.masked || this.gunOut || this.inOffLimits || this.lockpicking || this.plantingBomb || this.carry !== null || hero_drag_target !== null)return true;
             else return false;
         }
         

@@ -1640,6 +1640,7 @@ function updateDebugInfo(){
         "gunOut: " + hero.gunOut + "<br>" +
         "inOffLimits: " + hero.inOffLimits + "<br>" +
         "lockpicking: " + hero.lockpicking + "<br>" +
+        "plantingBomb: " + hero.plantingBomb + "<br>" +
         "Dragging: " + hero_drag_target + "<br>" +
         "gotMoney: " + hero.carry + "<br>" +
         "mouse: " + Math.round(mouse.x) + "," + Math.round(mouse.y) + "<br>" +

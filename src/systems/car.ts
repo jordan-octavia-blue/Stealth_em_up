@@ -265,11 +265,11 @@ function enterCar(): void {
 
   startEngine();
 
-  // The engine is loud: every guard hears it start and turns toward the van, so anyone who
-  // watched the hero get in transfers their attention to the car (roadmap §7).
-  if (typeof alert_all_guards === 'function') alert_all_guards();
-  hero.setLastSeen(null);
-
+  // Getting into the van is NOT a crime: it raises no alarm and no suspicion on its own.
+  // A guard only reacts to the van if the hero is *doing* something suspicious in it
+  // (masked, holding loot, etc. — see hero.willCauseAlert), or once the van is driven fast
+  // enough to be heard (the engine-noise broadcast in updateCarPreStep pulls already-alarmed
+  // guards toward it, but never alarms a calm one).
   const msg = hero.carry
     ? "You're in the van with the loot — drive to the escape zone!"
     : "You're in the van! (E to get out)";
