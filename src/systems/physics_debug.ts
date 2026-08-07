@@ -73,7 +73,16 @@ export function drawPhysicsDebug(): void {
     physics.forEachFixture((shape) => {
       const isDoor = (shape.category & CATEGORY.DOOR) !== 0;
       const isActor = shape.kind === 'actor';
-      const color = shape.kind === 'trigger' ? 0x9c27b0 : isDoor ? 0xffb300 : isActor ? 0x00e5ff : 0x9e9e9e;
+      const isCar = shape.kind === 'car';
+      const color = isCar
+        ? 0xff5252
+        : shape.kind === 'trigger'
+          ? 0x9c27b0
+          : isDoor
+            ? 0xffb300
+            : isActor
+              ? 0x00e5ff
+              : 0x9e9e9e;
       g.lineStyle(shape.sensor ? 1 : 2, color, shape.sensor ? 0.5 : 0.9);
       if (shape.circle) {
         const p = camera.relativePoint({ x: shape.circle.x, y: shape.circle.y });

@@ -19,6 +19,7 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
         this.gunOut = false;
         this.inOffLimits = false;
         this.lockpicking = false;
+        this.inCar = false;//true while driving the van (Phase 7) — a loud, obvious threat
         this.carry = null;
         this.spyglass_distance = 64;
         this.spyglass_equipped = false;
@@ -53,7 +54,7 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
         this.ability_body_armor = false;
         
         this.willCauseAlert = function(){
-            if(this.masked || this.gunOut || this.inOffLimits || this.lockpicking || this.carry !== null || hero_drag_target !== null)return true;
+            if(this.masked || this.gunOut || this.inOffLimits || this.lockpicking || this.inCar || this.carry !== null || hero_drag_target !== null)return true;
             else return false;
         }
         

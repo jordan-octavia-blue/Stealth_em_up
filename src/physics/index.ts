@@ -17,10 +17,21 @@
 
 import { events } from '../core/events';
 import { BULLET_MASK, CATEGORY, TICKS_PER_SECOND, VISION_MASK } from './constants';
-import { ActorOwner, DebugShape, PhysicsGridLike, PhysicsWorld, RayHit } from './world';
+import {
+  ActorOwner,
+  CarContact,
+  CarState,
+  DebugShape,
+  PhysicsGridLike,
+  PhysicsWorld,
+  RayHit,
+} from './world';
+import { CarControls, CarTuning, DEFAULT_CAR_TUNING } from './car';
 
 export { CATEGORY, PPM, BULLET_MASK, VISION_MASK, TICKS_PER_SECOND } from './constants';
-export type { ActorOwner, DebugShape, RayHit } from './world';
+export type { ActorOwner, DebugShape, RayHit, CarState, CarContact } from './world';
+export type { CarControls, CarTuning } from './car';
+export { DEFAULT_CAR_TUNING } from './car';
 
 /** One cell in a `nav:dirty` payload — mirrors `src/nav`'s reading of the same event. */
 type DirtyCell = number | { index: number; walkable?: boolean };
@@ -124,6 +135,61 @@ class Physics {
 
   teleport(owner: ActorOwner, x: number, y: number): void {
     this.impl.teleport(owner, x, y);
+  }
+
+  // --- car (roadmap §7) -----------------------------------------------------
+
+  /** Give the getaway van a body: a dynamic box, CCD on, driven by the car model. */
+  addCar(
+    owner: ActorOwner,
+    lengthPx: number,
+    widthPx: number,
+    angle: number,
+    tuning: CarTuning = DEFAULT_CAR_TUNING,
+  ): void {
+    this.impl.addCar(owner, { length: lengthPx, width: widthPx, angle, tuning });
+  }
+
+  removeCar(owner: ActorOwner): void {
+    this.impl.removeCar(owner);
+  }
+
+  hasCar(owner: ActorOwner): boolean {
+    return this.impl.hasCar(owner);
+  }
+
+  /** Apply one step of driver intent to the car. Call before `step()`. */
+  driveCar(owner: ActorOwner, controls: CarControls): void {
+    this.impl.driveCar(owner, controls);
+  }
+
+  /** The car's pixel position, radian angle and pixel/s velocity, or null. */
+  getCarState(owner: ActorOwner): CarState | null {
+    return this.impl.getCarState(owner);
+  }
+
+  teleportCar(owner: ActorOwner, x: number, y: number, angle: number): void {
+    this.impl.teleportCar(owner, x, y, angle);
+  }
+
+  /** Everything the car ran into this step (guards to run over, walls to breach). */
+  drainCarContacts(): CarContact[] {
+    return this.impl.drainCarContacts();
+  }
+
+  /**
+   * True when a circle of `radiusPx` at (x, y) is clear of walls, doors and bodies — the
+   * check that keeps the hero from being dropped out of the van into a wall.
+   */
+  spotClearForActor(x: number, y: number, radiusPx: number): boolean {
+    // Walls, closed doors and other bodies block; the van itself (CATEGORY.CAR) does not,
+    // or the spot right beside it would always read as occupied.
+    return this.impl.spotClear(
+      x,
+      y,
+      radiusPx,
+      CATEGORY.WALL | CATEGORY.DOOR | CATEGORY.HERO | CATEGORY.GUARD,
+    );
   }
 
   // --- map geometry ---------------------------------------------------------

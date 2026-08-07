@@ -22,7 +22,7 @@
  *    same world the same way.
  */
 
-import { Body, Box, Circle, Fixture, Vec2, World } from 'planck';
+import { AABB, Body, Box, Circle, Fixture, Vec2, World } from 'planck';
 import {
   ACTOR_MASK,
   CATEGORY,
@@ -32,6 +32,7 @@ import {
   TRIGGER_MASK,
   VELOCITY_ITERATIONS,
 } from './constants';
+import { CarControls, CarTuning, driveCarBody } from './car';
 
 /** The shape of the legacy `jo_grid` this module reads. Structural on purpose. */
 export interface PhysicsGridLike {
@@ -72,7 +73,7 @@ export interface RayHit {
   cell: number;
 }
 
-type FixtureKind = 'cell' | 'door' | 'trigger' | 'actor';
+type FixtureKind = 'cell' | 'door' | 'trigger' | 'actor' | 'car';
 
 interface FixtureData {
   kind: FixtureKind;
@@ -96,6 +97,47 @@ interface ActorRecord {
   radius: number;
 }
 
+interface CarRecord {
+  body: Body;
+  fixture: Fixture;
+  tuning: CarTuning;
+}
+
+/** Where the car's whole world state is handed back in pixel space, angle in radians. */
+export interface CarState {
+  x: number;
+  y: number;
+  /** Body angle (0 = pointing along +x). The render layer adds its own art offset. */
+  angle: number;
+  /** Velocity, pixels/second. */
+  vx: number;
+  vy: number;
+  /** Speed, pixels/second. */
+  speed: number;
+}
+
+/**
+ * Something the car ran into during a step, drained once per step by the game layer.
+ * `kind: 'actor'` is a body (a guard); `kind: 'cell'` is map geometry (a wall it may
+ * breach). `speed` is the closing speed at first contact, in pixels/second.
+ */
+export interface CarContact {
+  kind: 'actor' | 'cell';
+  owner: ActorOwner | null;
+  cell: number;
+  speed: number;
+}
+
+export interface CarOptions {
+  /** Box length along the car's forward axis, in pixels. */
+  length: number;
+  /** Box width across the car, in pixels. */
+  width: number;
+  /** Initial body angle in radians (0 = +x). */
+  angle: number;
+  tuning: CarTuning;
+}
+
 /** How far from a door's centre an opener has to be for the door to notice, in pixels.
  *  The old loop used `unit.radius * 4`, which is 76 px for a guard and 56 for the hero;
  *  the sensor is sized for the larger and exact per-opener distance is re-checked
@@ -110,6 +152,9 @@ export class PhysicsWorld {
   private doorFixtures = new Map<number, Fixture>();
   private triggerOverlaps = new Map<number, Set<ActorOwner>>();
   private actors = new Map<ActorOwner, ActorRecord>();
+  private cars = new Map<ActorOwner, CarRecord>();
+  /** Car-vs-world contacts seen during the current step; drained by `drainCarContacts`. */
+  private carContacts: CarContact[] = [];
   /** Box2D forbids destroying fixtures mid-step; these are flushed before the next one. */
   private pendingDestroy: Fixture[] = [];
 
@@ -155,11 +200,14 @@ export class PhysicsWorld {
   reset(): void {
     if (this.mapBody) this.world.destroyBody(this.mapBody);
     for (const record of this.actors.values()) this.world.destroyBody(record.body);
+    for (const record of this.cars.values()) this.world.destroyBody(record.body);
     this.mapBody = null;
     this.cellFixtures.clear();
     this.doorFixtures.clear();
     this.triggerOverlaps.clear();
     this.actors.clear();
+    this.cars.clear();
+    this.carContacts.length = 0;
     this.pendingDestroy.length = 0;
   }
 
@@ -241,6 +289,112 @@ export class PhysicsWorld {
     record.body.setLinearVelocity(Vec2(0, 0));
     owner.x = x;
     owner.y = y;
+  }
+
+  // --- car (roadmap §3.3, §7) -----------------------------------------------
+
+  /**
+   * Create the drivable van: a dynamic box that (unlike the actors) rotates freely and
+   * uses continuous collision detection (`bullet`), so a fast car never tunnels through a
+   * thin wall in a single step. Tracked apart from actors because it is steered by the
+   * top-down car model, not by a set-velocity.
+   */
+  addCar(owner: ActorOwner, options: CarOptions): void {
+    if (this.cars.has(owner)) return;
+    const body = this.world.createDynamicBody({
+      position: Vec2(owner.x / PPM, owner.y / PPM),
+      angle: options.angle,
+      bullet: true,
+      angularDamping: options.tuning.angularDamping,
+      allowSleep: false,
+    });
+    const halfLen = options.length / 2 / PPM;
+    const halfWid = options.width / 2 / PPM;
+    const fixture = body.createFixture(Box(halfLen, halfWid), {
+      density: 1,
+      friction: 0.3,
+      restitution: 0.1,
+      filterCategoryBits: CATEGORY.CAR,
+      filterMaskBits: ACTOR_MASK,
+    });
+    fixture.setUserData({ kind: 'car', cell: -1, owner } satisfies FixtureData);
+    this.cars.set(owner, { body, fixture, tuning: options.tuning });
+  }
+
+  removeCar(owner: ActorOwner): void {
+    const record = this.cars.get(owner);
+    if (!record) return;
+    this.world.destroyBody(record.body);
+    this.cars.delete(owner);
+  }
+
+  hasCar(owner: ActorOwner): boolean {
+    return this.cars.has(owner);
+  }
+
+  /** Apply one step of the top-down car model. Call before `step()`. */
+  driveCar(owner: ActorOwner, controls: CarControls): void {
+    const record = this.cars.get(owner);
+    if (!record) return;
+    driveCarBody(record.body, controls, record.tuning);
+  }
+
+  /** The car's position (px), angle (rad) and velocity (px/s), or null if it has no body. */
+  getCarState(owner: ActorOwner): CarState | null {
+    const record = this.cars.get(owner);
+    if (!record) return null;
+    const p = record.body.getPosition();
+    const v = record.body.getLinearVelocity();
+    const vx = v.x * PPM;
+    const vy = v.y * PPM;
+    return {
+      x: p.x * PPM,
+      y: p.y * PPM,
+      angle: record.body.getAngle(),
+      vx,
+      vy,
+      speed: Math.sqrt(vx * vx + vy * vy),
+    };
+  }
+
+  /** Move the car without simulating the trip (spawn/reset). */
+  teleportCar(owner: ActorOwner, x: number, y: number, angle: number): void {
+    const record = this.cars.get(owner);
+    if (!record) return;
+    record.body.setTransform(Vec2(x / PPM, y / PPM), angle);
+    record.body.setLinearVelocity(Vec2(0, 0));
+    record.body.setAngularVelocity(0);
+    owner.x = x;
+    owner.y = y;
+  }
+
+  /** Take (and clear) everything the car touched this step. */
+  drainCarContacts(): CarContact[] {
+    if (this.carContacts.length === 0) return [];
+    const out = this.carContacts;
+    this.carContacts = [];
+    return out;
+  }
+
+  /**
+   * True when nothing that matches `mask` overlaps a circle of `radiusPx` at (x, y). Used
+   * to pick a clear spot to drop the hero back out beside the van (roadmap §7 "physics
+   * overlap query guards against blocked exits"). Conservative: it tests the circle's
+   * bounding box, so a near-miss reads as blocked rather than risking a spawn inside a wall.
+   */
+  spotClear(x: number, y: number, radiusPx: number, mask: number): boolean {
+    if (!this.mapBody) return true;
+    const r = radiusPx / PPM;
+    const cx = x / PPM;
+    const cy = y / PPM;
+    let clear = true;
+    this.world.queryAABB(new AABB(Vec2(cx - r, cy - r), Vec2(cx + r, cy + r)), (fixture) => {
+      if (fixture.isSensor()) return true;
+      if ((fixture.getFilterCategoryBits() & mask) === 0) return true;
+      clear = false;
+      return false; // stop the query, we have our answer
+    });
+    return clear;
   }
 
   // --- map geometry ---------------------------------------------------------
@@ -446,17 +600,55 @@ export class PhysicsWorld {
   }
 
   private onContact(contact: { getFixtureA(): Fixture; getFixtureB(): Fixture }, begin: boolean): void {
-    const a = contact.getFixtureA().getUserData() as FixtureData | null;
-    const b = contact.getFixtureB().getUserData() as FixtureData | null;
+    const fa = contact.getFixtureA();
+    const fb = contact.getFixtureB();
+    const a = fa.getUserData() as FixtureData | null;
+    const b = fb.getUserData() as FixtureData | null;
     if (!a || !b) return;
+
+    // Car impacts: recorded on first touch (begin only), for the game layer to turn into
+    // run-overs and wall breaches. A car fixture is never a sensor, so this never fires
+    // for the door proximity triggers handled below.
+    if (begin && (a.kind === 'car' || b.kind === 'car') && !fa.isSensor() && !fb.isSensor()) {
+      const carFixture = a.kind === 'car' ? fa : fb;
+      const otherFixture = a.kind === 'car' ? fb : fa;
+      this.recordCarContact(carFixture, otherFixture, a.kind === 'car' ? b : a);
+      // fall through: a car body is never also a trigger, so nothing below applies to it
+    }
+
     const trigger = a.kind === 'trigger' ? a : b.kind === 'trigger' ? b : null;
     if (!trigger) return;
     const other = trigger === a ? b : a;
-    if (other.kind !== 'actor' || !other.owner) return;
+    // Doors notice people and the van alike, so the getaway car opens them too.
+    if ((other.kind !== 'actor' && other.kind !== 'car') || !other.owner) return;
     const set = this.triggerOverlaps.get(trigger.cell);
     if (!set) return;
     if (begin) set.add(other.owner);
     else set.delete(other.owner);
+  }
+
+  /** Turn a car↔something contact into a `CarContact`, tagged with the closing speed. */
+  private recordCarContact(carFixture: Fixture, otherFixture: Fixture, other: FixtureData): void {
+    // Only guards and map geometry matter: the hero is out of the world while driving, and
+    // car-vs-car can't happen with one van.
+    const isActor = other.kind === 'actor' && !!other.owner;
+    const isCell = other.kind === 'cell' || other.kind === 'door';
+    if (!isActor && !isCell) return;
+
+    // Closing speed = how fast the two bodies were approaching. A wall is static (0), so
+    // against geometry this is just the car's own speed.
+    const cv = carFixture.getBody().getLinearVelocity();
+    const ov = otherFixture.getBody().getLinearVelocity();
+    const dx = (cv.x - ov.x) * PPM;
+    const dy = (cv.y - ov.y) * PPM;
+    const speed = Math.sqrt(dx * dx + dy * dy);
+
+    this.carContacts.push({
+      kind: isActor ? 'actor' : 'cell',
+      owner: isActor ? other.owner : null,
+      cell: isCell ? other.cell : -1,
+      speed,
+    });
   }
 }
 

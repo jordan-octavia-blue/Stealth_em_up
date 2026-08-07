@@ -10,6 +10,7 @@
  * call — the first use of the FX seam the later phases build on.
  */
 import { events } from '../core/events';
+import { carCameraTarget, carZoomOut } from './car';
 
 //Tuning constants. Only this module reads them (they were window globals in main.ts).
 var kickback_speed = 5;
@@ -21,20 +22,29 @@ export function updateCamera(deltaTime){
     //////////////////////
     //this code allows the zoom / scale to change smoothly based on the mouse wheel input
 
-   if(stage_child.scale.x < zoom - 0.05){//the 0.05 is close enough to desired value to stop so the zoom doesn't bounce back and forth.
+    //In car mode the view pulls back ~1.3x (roadmap §7); the wheel-zoom still applies on top.
+    var carTarget = carCameraTarget();
+    var desiredZoom = carTarget ? zoom * carZoomOut() : zoom;
+
+   if(stage_child.scale.x < desiredZoom - 0.05){//the 0.05 is close enough to desired value to stop so the zoom doesn't bounce back and forth.
         stage_child.scale.x += zoom_magnitude;
         stage_child.scale.y += zoom_magnitude;
         changeFontSizes();
-    }else if(stage_child.scale.x > zoom + 0.05){//the 0.05 is close enough to desired value to stop so the zoom doesn't bounce back and forth.
+    }else if(stage_child.scale.x > desiredZoom + 0.05){//the 0.05 is close enough to desired value to stop so the zoom doesn't bounce back and forth.
         stage_child.scale.x -= zoom_magnitude;
         stage_child.scale.y -= zoom_magnitude;
         changeFontSizes();
 
     }
 
-    //loose camera
-    camera.x = hero.x + (mouse.x - hero.x)/look_sensitivity;
-    camera.y = hero.y + (mouse.y - hero.y)/look_sensitivity;
+    //loose camera — follows the hero, or leads the van by its velocity while driving.
+    if(carTarget){
+        camera.x = carTarget.x;
+        camera.y = carTarget.y;
+    }else{
+        camera.x = hero.x + (mouse.x - hero.x)/look_sensitivity;
+        camera.y = hero.y + (mouse.y - hero.y)/look_sensitivity;
+    }
     //don't let camera show out of bounds:
     var cam_width = window_properties.width*(1/stage_child.scale.x);
     var cam_height = window_properties.height*(1/stage_child.scale.y);

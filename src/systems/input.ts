@@ -16,6 +16,7 @@ import { cycleNavDebug } from './nav_debug';
 import { cyclePhysicsDebug } from './physics_debug';
 import { cycleBreachDebug } from './breach_debug';
 import { physics } from '../physics';
+import { isInCar, toggleCar } from './car';
 
 export function mouseMove(e){
     //Viewport coords, not document coords: camera.getMouse wants the position within the
@@ -41,7 +42,16 @@ export function addKeyHandlers(){
         //this function is called every frame that said key is down
         var code = e.keyCode ? e.keyCode : e.which;
         //keyinfo[code] = String.fromCharCode(code);
-        if(hero.alive){
+        if(hero.alive && isInCar()){
+            //Driving the van: only the car controls respond. Weapons, the bomb, the mask,
+            //lockpicking and body-dragging are all unavailable until you get out (E).
+            if(code == 87){keys['w'] = true;}
+            if(code == 65){keys['a'] = true;}
+            if(code == 83){keys['s'] = true;}
+            if(code == 68){keys['d'] = true;}
+            if(code == 32){keys['space'] = true;}//handbrake
+            if(code == 69){if(!keys['e'])toggleCar();keys['e'] = true;}//E: get out
+        }else if(hero.alive){
             /*
             if(code == 49){hero.changeGun(0);}//key 1
             if(code == 50){hero.changeGun(1);}//key 2
@@ -267,6 +277,7 @@ export function addKeyHandlers(){
                 }
 
             }
+            if(code == 69){if(!keys['e'])toggleCar();keys['e'] = true;}//E: get into the van
         }
 
         if(code == 27){
@@ -284,6 +295,7 @@ export function addKeyHandlers(){
         if(code == 68){keys['d'] = false;}
         if(code == 70){keys['f'] = false;}
         if(code == 71){keys['g'] = false;}
+        if(code == 69){keys['e'] = false;}
         if(code == 82){keys['r'] = false;}
         if(code == 78){keys['n'] = false;}
         if(code == 66){keys['b'] = false;}
@@ -408,7 +420,7 @@ function mouseWheelHandler(e){
     }
 }
 export function removeHandlers(excludeKeyHandlers?){
-    keys = {w: false, a: false, s: false, d: false, r: false, f: false, v: false, g:false, space:false, shift:false, LMB:false};
+    keys = {w: false, a: false, s: false, d: false, r: false, f: false, v: false, g:false, e:false, space:false, shift:false, LMB:false};
 
     //if excludeKeyDown is true, don't remove the onkeydown and onkeyup listeners
     if(!excludeKeyHandlers)window.onkeydown = null;

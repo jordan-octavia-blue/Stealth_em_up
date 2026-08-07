@@ -14,6 +14,13 @@ import { drawNavDebug, resetNavDebug } from '../systems/nav_debug';
 import { drawPhysicsDebug, resetPhysicsDebug } from '../systems/physics_debug';
 import { drawBreachDebug, resetBreachDebug } from '../systems/breach_debug';
 import { setupFog, updateFog, resetFog, FOG_RADIUS } from '../render/fog';
+import {
+  initCar,
+  resetCarSystem,
+  isInCar,
+  updateCarPreStep,
+  updateCarPostStep,
+} from '../systems/car';
 import { loadMap } from '../map/loader';
 import { DAMAGE_AMOUNT } from '../map/tileset';
 // Side-effect import: wires the breach FX + AI listeners onto `cell:destroyed` (roadmap
@@ -243,6 +250,9 @@ window.alarmingObjects ??= undefined;//guards will sound alarm if they see an al
 			//Loot and Getaway car:
 			window.getawaycar ??= undefined;
 			window.loot ??= undefined;
+			window.escape_zone ??= undefined;//[x,y,w,h] win region (Phase 7)
+			window.escape_zone_sprite ??= undefined;//the ground marker for it
+			window.hasWon ??= false;//latches the win so it fires once
 
   
 //UI text.  Use newMessage() to add a message.
@@ -346,6 +356,8 @@ function clearStage(){
     //to be removed with their container.
     nav.reset();
     physics.reset();
+    resetCarSystem();
+    hasWon = false;
     resetNavDebug();
     resetPhysicsDebug();
     resetBreachDebug();
@@ -649,13 +661,24 @@ function setup_map(map){
             
 			//Loot and Getaway car:
 			getawaycar = new jo_sprite(new PIXI.Sprite(img_getawaycar));
-			getawaycar.sprite.anchor.y = 0.0;
-			getawaycar.sprite.anchor.x = 0.5;
 			getawaycar.x = map.objects.van[0];
 			getawaycar.y = map.objects.van[1];
-            grid.makeWallSolid(getawaycar.x,getawaycar.y);//makes the ground under the car solid
-            grid.makeWallSolid(getawaycar.x,getawaycar.y-64);//makes the ground under the car solid
-			getawaycar.rad = -Math.PI/2;
+			//Phase 7: the van is a drivable dynamic body now, not a sealed prop. `initCar`
+			//gives it a physics box, centres its sprite and parks it pointing up (-pi/2).
+			//No `makeWallSolid` under it any more — the car's own body is the collision.
+			initCar(getawaycar, -Math.PI/2);
+
+			//Escape zone (roadmap §7): a map-edge trigger region [x,y,w,h] the loot-laden van
+			//must reach to win. Marked on the ground so the player can see where to drive.
+			escape_zone = (map.objects && map.objects.escape) ? map.objects.escape : null;
+			if(escape_zone){
+				escape_zone_sprite = new PIXI.Graphics();
+				escape_zone_sprite.beginFill(0x00ff66, 0.12);
+				escape_zone_sprite.lineStyle(3, 0x00ff66, 0.8);
+				escape_zone_sprite.drawRect(escape_zone[0], escape_zone[1], escape_zone[2], escape_zone[3]);
+				escape_zone_sprite.endFill();
+				display_tiles.addChild(escape_zone_sprite);
+			}
 			loot = [];
 			var money = new jo_sprite(new PIXI.Sprite(img_money));
 			money.x = map.objects.loot[0];
@@ -736,6 +759,12 @@ function gameloop_guards(deltaTime){
     for(var i = 0; i < guards.length; i++){
         var guard = guards[i];
         if(guard.alive){
+            //Dodging the van (Phase 7): for the ~0.5s override, the guard ignores its normal
+            //AI and just scrambles toward the sidestep target the car system set.
+            if(guard.dodgeUntil && gameClock.now() < guard.dodgeUntil){
+                guard.move_to_target();
+                continue;
+            }
             if(enableLOS){
                 // Only limit showing guards when LOS / fog of war is on
                 // --
@@ -1260,36 +1289,32 @@ function gameloop_getawaycar_and_loot(deltaTime){
         loot[i].prepare_for_draw();
     }
     
-    //pickup loot if close enough
-    if(!hero.carry){
+    //pickup loot if close enough — on foot only (you can't grab it through the windscreen).
+    if(!hero.carry && !isInCar()){
         //check if hero is close enough to the loot to pick it up
         for(var i = 0; i < loot.length; i++){
             if(get_distance(hero.x,hero.y,loot[i].x,loot[i] .y) <= hero.radius*2){
                 hero.carry = loot[i];
                 loot[i].sprite.visible = false;
                 //hero.sprite.texture = (img_hero_with_money);
-                newMessage("You've got the money!  Get it to the escape vehicle!");
+                newMessage("You've got the money!  Get it to the van and drive to the escape zone!");
                 break;
             }
         }
-        
-    //check distance between the loot-carrying hero and the escape van, if he is close enough, deposit the loot.
-    }else{
-        //console.log("ggg: " + getawaycar.radius*5 + " " + get_distance(hero.x,hero.y,getawaycar.x,getawaycar.y));
-        if(get_distance(hero.x,hero.y,getawaycar.x,getawaycar.y) <= getawaycar.radius*5){
-            //deposite money in car:
-            newMessage("The money is safe!");
-            //add button for win condition
+    }
+
+    //Win condition (roadmap §7): the getaway is an escape *drive*. You win when you are in
+    //the van, carrying the loot, and the van reaches the escape zone — not by walking the
+    //money up to a parked prop. The old 95px on-foot proximity win is gone.
+    if(!hasWon && isInCar() && hero.carry && escape_zone){
+        var ex = escape_zone[0], ey = escape_zone[1], ew = escape_zone[2], eh = escape_zone[3];
+        if(getawaycar.x >= ex && getawaycar.x <= ex+ew && getawaycar.y >= ey && getawaycar.y <= ey+eh){
+            hasWon = true;
+            newMessage("You escaped with the loot! Clean getaway.");
             //Used to send you back to the upgrade hub to spend the payout. There is no hub
             //and no payout any more, so the only thing left to offer is another run.
             addButton("Play Again",window.innerWidth/2,window.innerHeight/2,function(){location.reload();});
-
-            //add to stats:
             jo_store_inc("wins");
-
-
-            hero.carry = null;
-            
         }
     }
 }
@@ -1500,7 +1525,11 @@ function gameloop(deltaTime){
         }
     }
     hero_last_seen.prepare_for_draw();
-    
+
+    //Drivable van (Phase 7): read the wheel/pedals into the car body and set up guard
+    //dodges BEFORE the physics step and before the guards act on it this frame.
+    updateCarPreStep();
+
     gameloop_guards(deltaTime);
 
     if(notifyGuardsOfHeroLocation)console.log("Repath all guards to hero last seen");
@@ -1515,6 +1544,10 @@ function gameloop(deltaTime){
     //owns it. Wall sliding, guard separation and shoving all come out of this step.
     physics.step(deltaTime);
     physics.syncActors();
+
+    //Van (Phase 7): copy the car body back onto its sprite, then resolve what it hit this
+    //step — guards run over, weak walls breached — and lead the camera.
+    updateCarPostStep(deltaTime);
 
     hero.prepare_for_draw();
     for(var i = 0; i < guards.length; i++){
