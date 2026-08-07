@@ -121,6 +121,9 @@ export function smoothPath(
 ): Point[] {
   if (cells.length === 0) return [];
   const points: Point[] = cells.map((index) => grid.pointAtIndex(index));
+  // Centre of the cell the unit stands in. Unlike the unit's real position it sits a full
+  // body-radius clear of that walkable cell's walls, so it is a safe pivot to lead with.
+  const startCellCentre = points[0];
   if (start) points[0] = { x: start.x, y: start.y };
 
   const out: Point[] = [];
@@ -135,6 +138,18 @@ export function smoothPath(
     }
     out.push(points[furthest]);
     anchor = furthest;
+  }
+
+  // Every leg but the first runs centre-to-centre between corner-safe cells, so the body
+  // clears it. The first leg is the exception: it starts at the unit's real position, and
+  // `furthest = anchor + 1` commits to it with no clearance test. When physics has packed
+  // the unit off-centre against a wall, the straight line from there to the first cell
+  // centre can clip the very corner the grid path was routed around — the "path through a
+  // wall" that leaves a guard grinding along it. If that leg isn't clear for the body,
+  // lead with the unit's own cell centre: reaching it is clear, and from a cell centre the
+  // rest of the path was already safe.
+  if (start && out.length > 0 && !isCorridorWalkable(grid, points[0], out[0], radius)) {
+    out.unshift(startCellCentre);
   }
   return out;
 }

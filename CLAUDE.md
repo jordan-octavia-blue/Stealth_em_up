@@ -1,10 +1,25 @@
-# Stealth_em_up — project notes for Claude
+# CLAUDE.md
 
-Top-down stealth game. Legacy JavaScript ported to TypeScript: the core gameplay
-lives in `src/legacy/` (still written in the old global-function style), with newer
-systems in `src/systems/`, `src/physics/`, and `src/nav/`. Tests are Vitest under
+Guidance for working in this repo. Start with `README.md` (how to run, layout) and
+`docs/SYSTEMS_ROADMAP.md` (architecture and the phased modernization plan).
+
+- `src/game.ts` is the `game.html` entry; `src/menu.ts` is `menu.html`'s.
+- Legacy ES5, converted to ES modules, lives in `src/legacy/` and still shares state
+  through `window` (see `src/legacy-bridge.ts` / `src/legacy-globals.d.ts`).
+- Extracted subsystems live under `src/systems/`, `src/nav/`, `src/physics/`, `src/map/`,
+  `src/render/`, `src/core/`. Tests are Vitest under
 `test/`. Typecheck with `npx tsc --noEmit -p tsconfig.json`; run tests with
 `npx vitest run`.
+
+## Controls
+
+The keyboard/mouse handlers are the single source of truth — `src/systems/input.ts`
+(`addKeyHandlers`), with the debug-overlay cycles in `src/systems/nav_debug.ts`,
+`src/systems/physics_debug.ts`, and `src/systems/breach_debug.ts`.
+
+The player-facing list of controls lives in the menu (`menu.html`, the "Controls" screen).
+When you add, remove, or rebind a key in `input.ts` — including the bomb (`F`) and the debug
+overlays (`N` / `B` / `H`) — update that menu list to match so the two never drift apart.
 
 ## How and why guards get alerted
 
@@ -32,15 +47,21 @@ hero worth raising the alarm over:
 | Planting a bomb | `hero.plantingBomb` | During the ~1.5s bomb-plant channel (F key) |
 | Carrying stolen loot | `hero.carry` | Holding the money |
 | Dragging / choking a body | `hero_drag_target` | Dragging a corpse or choking a guard |
+| Just rammed a wall / ran someone over in the van | `hero.vanSuspiciousUntil` | The van hits a wall hard or mows a guard down (`src/systems/car.ts`); a short deadline set by `markVanSuspicious()` |
 
 The mask is protection **until a guard sees your face unmasked** — once a guard sets
 `knowsHerosFace` (`sprite_guard.ts`), the mask no longer hides you from that guard.
 
-**A vehicle is not on this list.** Sitting in or driving the getaway van
-(`hero.inCar`) is deliberately *not* suspicious by itself. Guards react to the van
-only if the hero is doing one of the things above while in it (e.g. driving off with
-the loot, or masked), or once it is driven fast enough to be heard (see below). This
-is intentional: a van is just a van.
+**Calmly driving a vehicle is not on this list; ramming things in it is.** Sitting in
+or gently driving the getaway van (`hero.inCar`) is deliberately *not* suspicious by
+itself — a van is just a van. But the *violent* things a van does are: ramming a wall
+or running a guard over briefly marks the hero suspicious (`hero.vanSuspiciousUntil`,
+a ~2.5s gameClock deadline set from `src/systems/car.ts`). During that window any guard
+or camera that sees the van alarms through the normal detection path — and, if the
+driver is unmasked, learns their face — exactly as for any other suspicious act.
+Guards also react to the van whenever the hero is *already* doing one of the things
+above while in it (e.g. masked, or driving off with the loot), and a fast van is heard
+even when nothing suspicious is happening (see below).
 
 ### How a guard/camera turns a sighting into an alarm
 
