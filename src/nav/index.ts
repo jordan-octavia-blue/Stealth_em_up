@@ -21,7 +21,7 @@ import { computeFlowField, FlowField, pathFromField } from './flowfield';
 import { NavGrid, Point } from './navgrid';
 import { labelRegions, RegionMap } from './regions';
 import { PathHandle, PathPriority, PathRequest, PathScheduler } from './scheduler';
-import { smoothPath } from './smooth';
+import { isCorridorWalkable, smoothPath } from './smooth';
 
 export { NavGrid } from './navgrid';
 export type { Point } from './navgrid';
@@ -234,6 +234,25 @@ class Nav {
     const cells = pathFromField(grid, this.field, start);
     if (cells.length === 0) return [];
     return smoothPath(grid, cells, radius, from);
+  }
+
+  /**
+   * True when a unit of `radius` can walk the straight line from `a` to `b` without its
+   * body clipping a wall.
+   *
+   * A smoothed path only guarantees each leg is clear *from the spot it was planned at*.
+   * By the time a unit actually walks its first leg it may be somewhere else — a search
+   * resolves a few fixed steps after it was requested, a replaced route can leave a stale
+   * target behind, or the physics solver shoves the body off the planned line. This is the
+   * follow-time check the guard loop uses so a unit never chases a waypoint straight
+   * through a wall; when it fails the caller drops the route and re-plans from where the
+   * unit actually is (`smoothPath` clearance-checks the new first leg against that spot).
+   *
+   * Returns true before the grid is built so it never blocks movement during setup.
+   */
+  isDirectPathClear(a: Point, b: Point, radius = 0): boolean {
+    if (!this.grid) return true;
+    return isCorridorWalkable(this.grid, a, b, radius);
   }
 
   /**

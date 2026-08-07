@@ -934,6 +934,23 @@ function gameloop_guards(deltaTime){
                 guard.idling = true;*/
                 
             }
+            //The straight line to the current waypoint is only guaranteed wall-clear from
+            //the spot the route was planned at. By the time the guard follows its first leg
+            //it can be elsewhere: a path search resolves a few fixed steps after it was
+            //requested, a route replaced mid-leg leaves a stale target behind, or the
+            //physics solver shoves the body off the planned line. Steering blindly then
+            //drives the guard's "next point" line straight through a wall (always the first
+            //leg — the waypoint-to-waypoint legs are cell-centre to cell-centre and stay
+            //clear). If the leg from where the guard actually is to its target isn't clear
+            //for its body, drop the route so a fresh one is planned from here; smoothPath
+            //clearance-checks the new first leg against this position.
+            if(nav.ready && guard.moving && guard.target.x != null &&
+               !nav.isDirectPathClear({x:guard.x,y:guard.y}, guard.target, guard.radius)){
+                guard.target.x = null;
+                guard.target.y = null;
+                guard.path = [];
+                guard.chasingHero = false;
+            }
             //call move to target, if target is reached, it will return true and set target to null
             if(guard.move_to_target()){
                 guard.target.x = null;
