@@ -1,10 +1,25 @@
-# Stealth_em_up — project notes for Claude
+# CLAUDE.md
 
-Top-down stealth game. Legacy JavaScript ported to TypeScript: the core gameplay
-lives in `src/legacy/` (still written in the old global-function style), with newer
-systems in `src/systems/`, `src/physics/`, and `src/nav/`. Tests are Vitest under
+Guidance for working in this repo. Start with `README.md` (how to run, layout) and
+`docs/SYSTEMS_ROADMAP.md` (architecture and the phased modernization plan).
+
+- `src/game.ts` is the `game.html` entry; `src/menu.ts` is `menu.html`'s.
+- Legacy ES5, converted to ES modules, lives in `src/legacy/` and still shares state
+  through `window` (see `src/legacy-bridge.ts` / `src/legacy-globals.d.ts`).
+- Extracted subsystems live under `src/systems/`, `src/nav/`, `src/physics/`, `src/map/`,
+  `src/render/`, `src/core/`. Tests are Vitest under
 `test/`. Typecheck with `npx tsc --noEmit -p tsconfig.json`; run tests with
 `npx vitest run`.
+
+## Controls
+
+The keyboard/mouse handlers are the single source of truth — `src/systems/input.ts`
+(`addKeyHandlers`), with the debug-overlay cycles in `src/systems/nav_debug.ts`,
+`src/systems/physics_debug.ts`, and `src/systems/breach_debug.ts`.
+
+The player-facing list of controls lives in the menu (`menu.html`, the "Controls" screen).
+When you add, remove, or rebind a key in `input.ts` — including the bomb (`F`) and the debug
+overlays (`N` / `B` / `H`) — update that menu list to match so the two never drift apart.
 
 ## How and why guards get alerted
 
@@ -81,3 +96,4 @@ Dead bodies are their own alarm source: `guard.kill()` pushes the corpse into
 - `src/legacy/jo_security_camera.ts` — camera alarm logic and dead-body registration.
 - `src/systems/car.ts` — van enter/exit, driving, and engine noise.
 - `src/systems/input.ts` — key handlers that set the suspicion flags.
+
