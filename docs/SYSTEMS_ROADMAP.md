@@ -34,7 +34,12 @@ Guiding constraints:
 > carry a `material` and `hp` from `data/tileset.json`; maps are loaded through a versioned
 > loader (`src/map/loader.ts`) that upgrades the old v1 `bank_1.jomap`. The old
 > geometry-change event `nav:dirty` stays only for the reverse case (an object sealing the
-> ground under itself); `nav:dirty` for breaches is gone.
+> ground under itself); `nav:dirty` for breaches is gone. **Post-Phase 6:** #5 and #8's
+> `alarmingObjects` item are addressed — the `alarmedPre/alarmed/chasingHero` flag soup in
+> `gameloop_guards` is replaced by a hierarchical FSM + perception in `src/ai/` (range-capped
+> vision with an awareness meter, nav-distance hearing, decaying memory, a de-escalating
+> global alert level, and a health model). The hero's stimulus no longer appends to
+> `alarmingObjects` (dead bodies still do).
 
 The game is plain ES5 loaded as 27 ordered `<script>` tags in `game.html`, sharing ~100
 globals. Pixi.js v3 is vendored in `bin/`. There is no npm, no bundler, no modules — the
@@ -875,6 +880,92 @@ entry/peek, FLEE, wave-based backup.
 all guards path through it; kill two entrants and assert the third holds or flanks. FSM
 transition unit tests (pure functions). Playtest: guards feel smart; the alarm eventually
 cools down.
+
+#### What shipped
+
+`src/ai/` — 7 files, strict TypeScript, no window globals, no Pixi. The pure logic core is
+everything the FSM decision turns on; the guard loop feeds it perception and drives the
+effects off the state it returns.
+
+| File | What it owns |
+|---|---|
+| `types.ts` | The vocabulary: `GuardState` (PATROL/SUSPICIOUS/INVESTIGATE/COMBAT/SEARCH/FLEE/DEAD), `AlertLevel`, the `Sound`/`Perception`/`Memory` shapes. Plain data — the pure modules operate on these and nothing else. |
+| `awareness.ts` | The 0→1 detection meter (roadmap §5.2). Fills while an alerting target is visible — faster the closer and faster-moving — and drains otherwise. Crossing `SUSPICIOUS_THRESHOLD` on the way up is the "?!" telegraph; a full meter is COMBAT. Framerate-independent. |
+| `memory.ts` | The decaying belief: `rememberSighting`, `memoryConfidence` (half-life), `isForgotten`, and `predictedPos` (velocity extrapolation, clamped so a glimpse isn't chased across the map). Replaces the append-only `alarmingObjects` scan *for the hero*. |
+| `hearing.ts` | The loudness table (gunshot/breach/glass/engine/body/footstep, in px of nav carry) and `isAudible(navDistance, loudness, k)`. A silenced weapon emits `footstep`. |
+| `alert.ts` | The global squad temperature as one continuous value in [0,3] mapped to the four bands, with `escalate`/`escalateTo`/`decayAlert`. The decay — held above a floor only while a threat is actively in view — is what ends "alarmed forever". |
+| `fsm.ts` | `nextState(current, ctx)`: the whole transition table as one **pure function** (roadmap §5.1's stated requirement), so it is exhaustively unit-testable. FLEE pre-empts every engaged state; DEAD is terminal. |
+| `blackboard.ts` | The `SquadBlackboard` (roadmap §5.3): fused belief (freshest sighting wins), one-token-per-entry claims (`claimEntry`/`releaseEntry`), witnessed-death count, plus the free functions `assignEntries` (greedy low-cost-first, one guard per entry — the funnel-spreading assignment) and `shouldFlee` (morale from hp + living allies − witnessed deaths). |
+| `brain.ts` | `GuardBrain`: the stateful glue. Owns the awareness meter, the memory and the `GuardState`; `update(BrainInput)` steps them and runs `nextState`. Reads no globals — the guard loop hands it perception, so it is testable with hand-built inputs. |
+| `index.ts` | The `ai` facade: the shared `SquadBlackboard` and global alert singletons, `raiseAlarmed`/`raiseSuspicious`/`raiseLockdown`, `decay(dt, activeThreat)`, and `reset()` on level load. Like `nav`/`physics`, the only surface the legacy code talks to. |
+
+What changed outside `src/ai/`:
+
+- **The flag soup is gone.** `gameloop_guards`' `alarmedPre/alarmed/chasingHero` branching
+  is replaced by: build perception (a range-capped cone raycast + hero stance + the heard
+  sound), `guard.brain.update(...)`, then a `switch` on the returned state that drives the
+  existing effects (aim/shoot/reaction-timer, textures, the alert icon, repath). `alarmed`
+  survives as a compat flag other code still reads (the riot-shield bullet check, textures),
+  kept in sync with the FSM each tick.
+- **Vision has a range now** (~450 px; the cone was unlimited) and detection is telegraphed
+  by the meter instead of being instant. The LOS check is still Phase 4's physics raycast.
+- **Hearing** (roadmap §5.2): a per-step sound queue is resolved against every guard via a
+  new `nav.hearingDistance(source, listener)` — one reverse Dijkstra per source cell,
+  cached, distance in px — so a sound bends around walls and an occluded listener never
+  hears it. The hero's shots (loud, or `footstep`-quiet when silenced) and the bomb breach
+  emit sounds; a heard gunshot/breach seeds the squad belief and sends patrollers to
+  INVESTIGATE. Replaces the flat 500 px through-wall radius.
+- **De-escalation** runs once per step (`ai.decay`), held up only while a guard actively
+  sees the hero. When it cools to Calm, a guard whose SEARCH has timed out falls back to
+  PATROL — texture, speed and accuracy reset.
+- **Health model** (roadmap §5.4): guards get `hp: 100` and one damage entry point,
+  `takeDamage(amount, type, fromX, fromY)`; the bullet path routes through it. Default
+  bullet damage one-shots, so the feel is unchanged while the model is in place for Phase 8.
+- **Squad, live:** fused belief (any guard's sighting → shared last-known → the whole squad
+  converges on it through Phase 3's flow field); the FLEE utility (a wounded, isolated,
+  demoralised guard breaks off and the last guard alive doesn't charge); danger deposits on
+  ally deaths (Phase 3/5) that already route later paths around a chokepoint where a guard
+  fell. Backup still arrives in waves.
+- **Debug overlay on `M`**, cycling off → fsm (state labels + awareness bars + a squad-alert
+  readout) → vision (adds each guard's range ring) — `src/systems/ai_debug.ts`, alongside
+  `N`/`B`/`H`, and listed in the in-game controls table.
+- **`tsconfig.strict.json`** now type-checks `src/ai` and `test/ai` under full strict.
+
+#### Deviations worth recording
+
+| | |
+|---|---|
+| **Dead bodies still flow through `alarmingObjects`.** Memory replaces the append-only array *for the hero* (stimuli consumed once, belief decays), but a guard that spots a corpse still raises the alarm through `seeAlarmingObject` — the meter only models the hero. The array is now scanned only by not-yet-alarmed guards. |
+| **Bullets stay one-shot.** The health model exists and the bullet path runs through `takeDamage`, but default damage is 100 vs 100 hp, so nothing about the feel changes until Phase 8's `data/weapons.json` sets per-weapon damage (and gives the frag grenade partial radial damage). |
+| **Entry tokens + doorCost spikes are built and unit-tested, not yet driving the live A\*.** `SquadBlackboard.claimEntry`/`assignEntries` (round-robin, one guard per entry) are complete and covered, but the live loop spreads the squad via the shared flow field + the death-danger layer rather than per-tick claimed-entry `doorCost` spikes and a HoldAtEntry/peek behaviour. The mechanism is scaffolded for the follow-up; the funnel is mitigated at runtime today, not eliminated by cost shaping. |
+| **Backup guards enter via `becomeAlarmed`, not "already in COMBAT with the blackboard belief".** They adopt the shared belief and head to the last-known position (SEARCH), which is the same convergence, one state removed. |
+
+#### Phase 6 verification
+
+**Vitest: 95 new cases** across 7 AI suites (330 total, all green): the full FSM transition
+table (every edge of the ladder, FLEE pre-emption, DEAD terminal, determinism); the
+awareness curve (proximity/speed/stance fill, drain rate, the SUSPICIOUS-before-DETECTED
+ordering, framerate independence); memory (confidence half-life, forget window, clamped
+extrapolation, no aliasing); hearing (loudness ordering, the audibility boundary, an
+unreachable listener); the alert level (band mapping, cooling from Alarmed to Calm, the
+active-threat floor, framerate independence); the blackboard (fused belief freshness,
+one-token-per-entry, `assignEntries` spreading two guards across two entries rather than
+stacking, `shouldFlee`'s last-guard-alive case); `GuardBrain` end-to-end (spots a near hero
+within a second or two, telegraphs through SUSPICIOUS, ignores a non-alerting or
+out-of-range hero, drops COMBAT→SEARCH on losing sight, gives up to PATROL once cooled,
+flees when broken); and `nav.hearingDistance` proving sound detours around a wall and never
+reaches a sealed region.
+
+**Smoke harness** (`tools/smoke.mjs`, Playwright vs the production build): all 31 gameplay
+assertions pass on repeated runs — including guards patrolling on the new FSM, a shot
+killing through `takeDamage`, guards still routing after a breach, and **30 s of an alarmed
+squad fighting in corridors with no guard wedged and none inside a wall**. (The one
+non-gameplay line it flags is a pre-existing audio `play()` AbortError from the music
+switching on mask/restart — unrelated to the AI.) Typecheck (loose + strict) and the
+production build are clean.
+
+A human playthrough for *feel* — whether the telegraph reads well, whether the squad now
+spreads convincingly — is still the thing the automated pass can't judge.
 
 ### Phase 7 — Drivable van (~1–2 weeks)
 

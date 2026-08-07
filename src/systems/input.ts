@@ -15,6 +15,7 @@ import { ejectShell } from './particles';
 import { cycleNavDebug } from './nav_debug';
 import { cyclePhysicsDebug } from './physics_debug';
 import { cycleBreachDebug } from './breach_debug';
+import { cycleAiDebug } from './ai_debug';
 import { physics } from '../physics';
 
 export function mouseMove(e){
@@ -106,6 +107,13 @@ export function addKeyHandlers(){
                     newMessage('Wall overlay: ' + cycleBreachDebug());
                 }
                 keys['h'] = true;
+            }
+            if(code == 77){
+                //key m: cycle the guard-AI overlay (off / fsm / vision)
+                if(!keys['m']){
+                    newMessage('AI overlay: ' + cycleAiDebug());
+                }
+                keys['m'] = true;
             }
             if(code == 70){
                 //plant bomb
@@ -288,6 +296,7 @@ export function addKeyHandlers(){
         if(code == 78){keys['n'] = false;}
         if(code == 66){keys['b'] = false;}
         if(code == 72){keys['h'] = false;}
+        if(code == 77){keys['m'] = false;}
         if(code == 86){
             //on release of key only
             //if(keys['v'])circProgBar.stop();//stop putting on mask

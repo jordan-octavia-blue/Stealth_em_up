@@ -10,9 +10,11 @@ import { updateCamera } from '../systems/camera';
 import { updateParticles, shardParticleSplatter, bloodParticleSplatter, ejectShell } from '../systems/particles';
 import { nav } from '../nav';
 import { physics, CATEGORY } from '../physics';
+import { ai, GuardState, loudnessFor, isAudible, HEARING_K } from '../ai';
 import { drawNavDebug, resetNavDebug } from '../systems/nav_debug';
 import { drawPhysicsDebug, resetPhysicsDebug } from '../systems/physics_debug';
 import { drawBreachDebug, resetBreachDebug } from '../systems/breach_debug';
+import { drawAiDebug, resetAiDebug } from '../systems/ai_debug';
 import { setupFog, updateFog, resetFog, FOG_RADIUS } from '../render/fog';
 import { loadMap } from '../map/loader';
 import { DAMAGE_AMOUNT } from '../map/tileset';
@@ -349,6 +351,7 @@ function clearStage(){
     resetNavDebug();
     resetPhysicsDebug();
     resetBreachDebug();
+    resetAiDebug();
     resetFog();
     //remove all children:
     removeAllChildren(display_tiles);
@@ -574,6 +577,13 @@ function setup_map(map){
     //opening a wall) reach nav through the `nav:dirty` event.
     nav.build(grid);
 
+    //Squad AI state (roadmap §5): wipe the shared blackboard and the global alert level
+    //so a restarted level doesn't inherit the last run's belief, entry claims, witnessed
+    //deaths, or alarm temperature. Hero motion tracking resets too.
+    ai.reset();
+    heroPrevX = undefined;
+    heroPrevY = undefined;
+
     //Static collision geometry (roadmap §3.2): one body for the map with a 2 m box
     //fixture per solid cell. Built before anything that seals a tile under itself (the
     //van, the security computer) — those go through `grid.makeWallSolid`, which reaches
@@ -732,7 +742,81 @@ function reactionTimeout(){
     if(this.doesSpriteSeeSprite(hero))this.can_shoot = true;
     this.reacting = false;
 }
+//Phase 6 hearing (roadmap §5.2). Sounds are queued during a step and resolved against
+//every guard at the top of gameloop_guards: a guard hears a sound when its cost-weighted
+//nav distance from the source (which bends around walls) is within the sound's carry.
+//This replaces the flat 500 px through-wall alert radius. The queue is drained each step.
+var pendingSounds = [];
+//Default damage a bullet does — enough to one-shot a 100 hp guard, so the feel is
+//unchanged while the health model (roadmap §5.4) is in place for Phase 8's grenades.
+var GUARD_BULLET_DAMAGE = 100;
+//A guard that has been searching this long, once the squad has cooled, gives up and
+//goes back to patrol (drives the SEARCH → PATROL transition; roadmap §5.2 de-escalation).
+var SEARCH_TIMEOUT_MS = 9000;
+//Hero motion between steps, for the awareness meter (faster targets are spotted sooner)
+//and memory extrapolation. Reset on map load in windowSetup. Module-local: only main.ts
+//touches them.
+var heroPrevX;
+var heroPrevY;
+
+//Queue a hearing stimulus at a world position. `type` picks the carry from the loudness
+//table; `sourcePos` lets a gunshot report the shooter's cell while crediting the belief
+//to the hero. Silenced weapons pass a quiet type so they barely carry.
+function emitSound(x, y, type){
+    pendingSounds.push({ pos:{x:x, y:y}, loudness: loudnessFor(type), type: type });
+}
+
+//Resolve the queued sounds against every living guard. A guard keeps the *closest*
+//audible sound as its heardPos for this step; gunshots and breaches also seed the squad
+//belief so the whole squad converges even though only one guard heard the shot.
+function resolveHearing(){
+    if(pendingSounds.length === 0)return;
+    for(var s = 0; s < pendingSounds.length; s++){
+        var snd = pendingSounds[s];
+        var seeds_belief = (snd.type === 'gunshot' || snd.type === 'breach' || snd.type === 'glass');
+        var heardByAnyone = false;
+        for(var g = 0; g < guards.length; g++){
+            var guard = guards[g];
+            if(!guard.alive)continue;
+            var d = nav.hearingDistance(snd.pos, {x:guard.x, y:guard.y});
+            if(!isAudible(d, snd.loudness, HEARING_K))continue;
+            heardByAnyone = true;
+            //keep the nearest audible sound
+            if(guard.heardPos == null || d < guard._heardDist){
+                guard.heardPos = {x:snd.pos.x, y:snd.pos.y};
+                guard._heardDist = d;
+            }
+        }
+        if(seeds_belief && heardByAnyone){
+            ai.squad.reportSighting(snd.pos, {x:0,y:0}, gameClock.now());
+            ai.raiseSuspicious();
+        }
+    }
+    pendingSounds.length = 0;
+}
+
 function gameloop_guards(deltaTime){
+    //advance the hearing model and squad de-escalation once per step, before the guards.
+    resolveHearing();
+    var now = gameClock.now();
+    var dtS = deltaTime/1000;
+    //hero velocity (px/s) for the awareness meter and memory prediction
+    if(heroPrevX === undefined){ heroPrevX = hero.x; heroPrevY = hero.y; }
+    var heroVel = { x:(hero.x-heroPrevX)/(dtS||1), y:(hero.y-heroPrevY)/(dtS||1) };
+    var heroSpeed = Math.sqrt(heroVel.x*heroVel.x + heroVel.y*heroVel.y);
+    heroPrevX = hero.x; heroPrevY = hero.y;
+    //living-guard census for the squad FLEE utility
+    var livingCount = 0;
+    for(var c = 0; c < guards.length; c++)if(guards[c].alive)livingCount++;
+    //stance multiplier: louder giveaways fill a watcher's meter faster
+    var heroStance = 1;
+    if(hero.gunOut)heroStance += 0.5;
+    if(hero.carry)heroStance += 0.3;
+    if(keys.shift && (keys.w||keys.a||keys.s||keys.d))heroStance += 0.3;
+    //true while any guard actively sees the hero — holds the alert level up (no cooldown
+    //while a threat is in view).
+    var anyGuardSeesHero = false;
+
     for(var i = 0; i < guards.length; i++){
         var guard = guards[i];
         if(guard.alive){
@@ -762,113 +846,158 @@ function gameloop_guards(deltaTime){
 
             }
             
-            guard.currentlySeesHero = guard.doesSpriteSeeSprite(hero);
-        
-                //shooting
-            //guards aim can be off by up to guard.accuracy pixels:
-            var aim_x_offset = Math.floor(Math.random() * guard.accuracy);
-            var aim_y_offset = Math.floor(Math.random() * guard.accuracy);
-            //only set aim if they are able to shoot again, don't reset aim every loop
-            if(guard.can_shoot){
-                
-                //take the ray from guard to hero and make it go all the way to the wall:
-                var guard_aim_to_wall = physics.sightStop(guard.x,guard.y,hero.x+aim_x_offset,hero.y+aim_y_offset);
-                guard.aim.set(guard.x,guard.y,guard_aim_to_wall.x,guard_aim_to_wall.y);
-            }
-            
-            
-            //if guard are not already alarmed
-            if(!guard.alarmed  && !guard.being_choked_out){
-                //check if guard sees alarming objects:
+            //--- Perception (roadmap §5.2) --------------------------------------
+            var seesHeroRaw = guard.doesSpriteSeeSprite(hero);
+            var distToHero = get_distance(guard.x, guard.y, hero.x, hero.y);
+            //Vision now has a max range; the old cone was unlimited.
+            var canSee = seesHeroRaw && distToHero <= guard.brain.maxVisionRange && hero.alive && !guard.being_choked_out;
+            guard.currentlySeesHero = canSee;
+            //The hero is worth reacting to when masked/armed/suspicious, or when this guard
+            //already knows the face. Learn the face while looking at an unmasked, alerting hero.
+            var alerting = canSee && (hero.willCauseAlert() || guard.knowsHerosFace);
+            if(alerting && !hero.masked)guard.knowsHerosFace = true;
+            if(canSee)anyGuardSeesHero = true;
+
+            //A guard that spots a dead body it hasn't reacted to yet raises the alarm through
+            //the same reaction-delayed path as before (bodies aren't covered by the meter).
+            if(!guard.alarmed && !guard.being_choked_out){
                 for(var j = 0; j < alarmingObjects.length; j++){
-                    if(guard.doesSpriteSeeSprite(alarmingObjects[j])){
+                    if(alarmingObjects[j] !== guard && guard.doesSpriteSeeSprite(alarmingObjects[j])){
                         newMessage('A guard has seen something alarming!');
                         guard.seeAlarmingObject(alarmingObjects[j]);
                     }
                 }
-                //check if guard sees hero:
-                if(!guard.being_choked_out && guard.currentlySeesHero){
-                    if(hero.willCauseAlert() || guard.knowsHerosFace){
-                        //guard will remember hero's face unless hero is masked:
-                        if(!hero.masked){
-                            guard.knowsHerosFace = true;
-                        }
-                        newMessage('A guard has seen you being suspicious!');
-                        //alarm if hero is seen masked
-                        guard.seeAlarmingObject(hero);
-                        
-                        //show alert icon for this guard:
-                        set_latestAlert(guard);
-                        
-                        //rotate guard to face hero:
-                        guard.target_rotate = hero;
-                        
-                        //set lastSeen for investigating hero
+            }
+
+            //shooting aim: guards aim can be off by up to guard.accuracy pixels
+            var aim_x_offset = Math.floor(Math.random() * guard.accuracy);
+            var aim_y_offset = Math.floor(Math.random() * guard.accuracy);
+            if(guard.can_shoot){
+                //take the ray from guard to hero and make it go all the way to the wall:
+                var guard_aim_to_wall = physics.sightStop(guard.x,guard.y,hero.x+aim_x_offset,hero.y+aim_y_offset);
+                guard.aim.set(guard.x,guard.y,guard_aim_to_wall.x,guard_aim_to_wall.y);
+            }
+
+            //--- FSM update (roadmap §5.1) --------------------------------------
+            var prevState = guard.brain.state;
+            var searchExhausted = guard.brain.timeInState(now) > SEARCH_TIMEOUT_MS;
+            var newState = guard.brain.update({
+                now: now,
+                dt: dtS,
+                canSeeTarget: canSee,
+                targetAlerting: alerting,
+                targetPos: {x:hero.x, y:hero.y},
+                targetVel: heroVel,
+                targetDist: distToHero,
+                targetSpeed: heroSpeed,
+                stanceFactor: heroStance,
+                heardPos: guard.heardPos,
+                alertLevel: ai.alertLevel(),
+                hpFraction: guard.hp / guard.maxHp,
+                livingAllies: livingCount - 1,
+                witnessedDeaths: ai.squad.witnessedDeaths,
+                reachedGoal: guard.reachedGoal,
+                searchExhausted: searchExhausted,
+            });
+            //consume the per-tick latches
+            guard.heardPos = null;
+            guard._heardDist = Infinity;
+            guard.reachedGoal = false;
+
+            if(guard.being_choked_out){
+                //being choked out overrides the AI entirely — stand still and be grabbed.
+                guard.moving = false;
+            }else{
+                //keep the compat `alarmed` flag (riot shield, textures) in sync with the FSM
+                var engaged = (newState === GuardState.Combat || newState === GuardState.Investigate || newState === GuardState.Search || newState === GuardState.Flee);
+                guard.alarmed = engaged;
+
+                //texture + speed follow the state; restore the calm look on stand-down
+                if(engaged){
+                    if(guard.knowsHerosFace)guard.sprite_body.texture = guard.hasRiotShield ? img_guard_riot_knows_face : img_guard_knows_hero_face;
+                    else guard.sprite_body.texture = guard.hasRiotShield ? img_guard_riot_alert : img_guard_alert;
+                    guard.speed = 3;
+                }else if(prevState !== newState){
+                    //de-escalated back to Patrol/Suspicious (roadmap §5.2): calm again.
+                    guard.sprite_body.texture = guard.knowsHerosFace
+                        ? (guard.hasRiotShield ? img_guard_riot_knows_face : img_guard_knows_hero_face)
+                        : (guard.hasRiotShield ? img_guard_riot_reg : img_guard_reg);
+                    guard.speed = 1.5;
+                    guard.accuracy = 50;
+                    guard.chasingHero = false;
+                    //re-arm the body-sighting latch so a stood-down guard reacts to a
+                    //corpse again if it stumbles on one later.
+                    guard.alarmedPre = false;
+                }
+
+                switch(newState){
+                    case GuardState.Combat:
+                        //engage: hold position, face and shoot the hero
+                        ai.raiseAlarmed();
+                        ai.squad.reportSighting({x:hero.x,y:hero.y}, heroVel, now);
                         hero.setLastSeen(guard);
                         guard.sawHeroLastAt = {x:hero.x,y:hero.y};
-                    }
-                    
-                }else{
-                    //guard doesn't see hero so set target_rotate to null so guard can rotate where he moves again
-                    guard.target_rotate = null;
-                }
-            }else{
-                //guard is alarmed:
-                if(!guard.being_choked_out && guard.currentlySeesHero){
-                    //guard is not being choked out and sees hero
-                    if((hero.willCauseAlert() || guard.knowsHerosFace) && hero.alive){
-                        //guard will remember hero's face unless hero is masked:
-                        if(!hero.masked){
-                            guard.knowsHerosFace = true;
-                            guard.sprite_body.texture = guard.hasRiotShield ? img_guard_riot_knows_face : img_guard_knows_hero_face;//show that this guard knows your face:
-                        }
-                        //reset target
+                        guard.chasingHero = false;
                         guard.moving = false;
+                        guard.path = [];
+                        guard.target = {x:null,y:null};
                         guard.target_rotate = hero;
-                        
+                        set_latestAlert(guard);
                         if(guard.can_shoot){
-                            
                             doGunShotEffects(guard, false);//plays sound
-                            
                             guard.shoot();
                             ejectShell(guard);
-                            
                             //increase guard's accuracy every time they shoot, for gameplay reasons
                             if(guard.accuracy > 10)guard.accuracy -= 10;
                             else guard.accuracy = 0;
-                            
-            
-                            
-                        }else{
-                            //if guard can't shoot yet (reaction time)
-                            if(!guard.reacting){
-                                guard.reacting = true;
-                                gameClock.after(guard.shoot_speed, reactionTimeout.bind(guard));
-                            }
+                        }else if(!guard.reacting){
+                            //reaction time before the first shot
+                            guard.reacting = true;
+                            gameClock.after(guard.shoot_speed, reactionTimeout.bind(guard));
                         }
-                        
-                        //show alert icon for this guard:
+                        break;
+                    case GuardState.Suspicious:
+                        //telegraph: pause, show "?!", face the hero — the readable beat before
+                        //full detection that replaces the old instant alarm.
+                        guard.moving = false;
+                        guard.path = [];
+                        guard.target = {x:null,y:null};
+                        guard.target_rotate = {x:hero.x, y:hero.y};
                         set_latestAlert(guard);
-                        
-                        //set lastSeen for investigating hero
-                        hero.setLastSeen(guard);
-                        guard.sawHeroLastAt = {x:hero.x,y:hero.y};
-                    }
-                }else{
-                    
-                    //if guard is alarmed rotate to the next waypoint so they peer around corners.
-                    //~guard doesn't see hero so set target_rotate to null so guard can rotate where he moves again
-                    //don't change rotation unless the guard is close to the point (this keeps them from walking backwards [bug])
-                    if(guard.path[0] && get_distance(guard.x,guard.y,guard.path[0].x,guard.path[0].y) < 100)guard.target_rotate = guard.path[0];
-                
-                    //if alarmed move to last place hero was seen
-                    if(notifyGuardsOfHeroLocation || !guard.chasingHero && hero.lastSeenX && hero.lastSeenY){
-                        //this is only called once due to .chasingHero
-                        //repath to hero pos
+                        break;
+                    case GuardState.Investigate:
+                    case GuardState.Search: {
+                        //head for the squad's shared last-known position — one flow field for
+                        //the whole squad — falling back to this guard's own memory.
                         guard.moving = true;
-                        guard.pathToCoords(hero.lastSeenX,hero.lastSeenY);
-                        guard.chasingHero = true;
+                        var goal = ai.squad.belief.pos || (guard.brain.memory.hasTarget ? guard.brain.memory.lastKnownPos : null);
+                        if(!goal && hero.lastSeenX)goal = {x:hero.lastSeenX, y:hero.lastSeenY};
+                        //peek around corners: face the next waypoint when close to it
+                        if(guard.path[0] && get_distance(guard.x,guard.y,guard.path[0].x,guard.path[0].y) < 100)guard.target_rotate = guard.path[0];
+                        else guard.target_rotate = null;
+                        if(goal){
+                            guard.pathToCoords(goal.x, goal.y);
+                            //arrived at the last-known spot with nothing here → sweep the area
+                            //(INVESTIGATE → SEARCH)
+                            if(get_distance(guard.x,guard.y,goal.x,goal.y) < 64)guard.reachedGoal = true;
+                        }
+                        break;
                     }
+                    case GuardState.Flee: {
+                        //break contact: steer directly away from the hero and regroup. Kept
+                        //off the shared flow field so a retreating guard doesn't thrash it.
+                        guard.moving = true;
+                        guard.path = [];
+                        guard.target_rotate = null;
+                        var dx = guard.x - hero.x, dy = guard.y - hero.y;
+                        var flee_len = Math.sqrt(dx*dx+dy*dy) || 1;
+                        guard.target = {x: guard.x + dx/flee_len*160, y: guard.y + dy/flee_len*160};
+                        break;
+                    }
+                    default:
+                        //PATROL: nothing to chase; rotate to movement direction.
+                        guard.target_rotate = null;
+                        break;
                 }
             }
             //if guard has a path
@@ -881,7 +1010,9 @@ function gameloop_guards(deltaTime){
                     guard.target = guard.path.shift();//get the first element.
                 }
                 
-            }else{
+            }else if(newState === GuardState.Patrol && !guard.being_choked_out){
+                //only a patrolling guard wanders; Combat/Suspicious hold, Investigate/Search
+                //and Flee set their own target above.
                 guard.getRandomPatrolPath();
                /* //set the rotation point when guard first starts idling
                 if(!guard.startedIdling){
@@ -927,6 +1058,10 @@ function gameloop_guards(deltaTime){
         //dynamic bodies now; the contact solver keeps them apart, and it also keeps them
         //out of walls, which the old code never did at all.
     }
+    //De-escalation (roadmap §5.2): the global alert level cools once no guard has the hero
+    //in sight, held above Calm only while a threat is actively visible. When it reaches
+    //Calm, guards whose search has timed out fall back to PATROL — "alarmed forever" gone.
+    ai.decay(dtS, anyGuardSeesHero);
 }
 function gameloop_security_cams(deltaTime){
     //////////////////////
@@ -1080,7 +1215,11 @@ function gameloop_bullets(deltaTime){
                     }
                 }
                 if(guardDies){
-                    victim.kill(bullet.ignore.x,bullet.ignore.y);
+                    //Route through the health model (roadmap §5.4). Default bullet damage
+                    //one-shots a 100 hp guard, so this is behaviourally identical to the old
+                    //direct kill() until Phase 8's weapon table sets per-weapon damage.
+                    if(victim.takeDamage)victim.takeDamage(GUARD_BULLET_DAMAGE, 'bullet', bullet.ignore.x, bullet.ignore.y);
+                    else victim.kill(bullet.ignore.x,bullet.ignore.y);
                     //make blood splatter:
                     bloodParticleSplatter(splatter_angle,victim);
                     //make blood trail:
@@ -1579,6 +1718,9 @@ function gameloop(deltaTime){
     //wall-destruction debug overlay (materials / hp bars), cycled with the H key
     drawBreachDebug();
 
+    //guard-AI debug overlay (FSM state labels, awareness bars, vision rings), cycled M
+    drawAiDebug();
+
     //The fog mask itself is redrawn once per *rendered* frame, from animate() — it is
     //presentation, and there is nothing to gain from sweeping twice for one picture.
 }
@@ -1651,6 +1793,11 @@ function spawn_individual_backup(){
 
 }
 function alert_all_guards(){
+    //Seed the shared belief so every alarmed guard converges on one place (roadmap §5.3
+    //fused belief): the hero's last-known position if we have one, else where they are now.
+    var beliefX = hero.lastSeenX ? hero.lastSeenX : hero.x;
+    var beliefY = hero.lastSeenY ? hero.lastSeenY : hero.y;
+    ai.squad.reportSighting({x:beliefX, y:beliefY}, {x:0,y:0}, gameClock.now());
     for(var z = 0; z < guards.length; z++){
         //alert the other living guards that are 500 distance away
         if(guards[z].alive && get_distance(hero.x,hero.y,guards[z].x,guards[z].y)<500)guards[z].becomeAlarmed();
@@ -1658,9 +1805,11 @@ function alert_all_guards(){
     if(!backupCalled){
         //this part cannot repeat in the same game
         backupCalled = true;
+        //the situation is fully out of hand — lockdown, and backup rolls in.
+        ai.raiseLockdown();
         //spawn backup:
         spawn_backup();
-        
+
     }
     
 }
@@ -1774,6 +1923,10 @@ function doGunShotEffects(unit, silenced){
     //this nudges paths away from an active firefight without permanently scarring the
     //map. (Phase 6 turns the same event into a hearing stimulus.)
     events.emit('nav:danger', {x: unit.x, y: unit.y, amount: silenced ? 0.5 : 1.5, radius: 1});
+    //Hearing stimulus (roadmap §5.2): the hero's shots carry through the nav graph so
+    //guards who didn't see it investigate the sound. A silenced shot barely carries; an
+    //unsilenced one is loud (and also trips the guaranteed alert in unsilenced_gun).
+    if(unit === hero)emitSound(unit.x, unit.y, silenced ? 'footstep' : 'gunshot');
 }
 
 //show alert icon
@@ -1857,6 +2010,8 @@ function explodeBomb(){
     //The overall blast is a loud, dangerous thing to have happened here (on top of the
     //per-breach danger each destroyed cell deposits).
     events.emit('nav:danger', {x: bomb.x, y: bomb.y, amount: 8, radius: 3});
+    //...and a loud hearing stimulus: guards across the map hear the breach and converge.
+    emitSound(bomb.x, bomb.y, 'breach');
 
     //see if it kills anyone:
     for(var g = 0; g < guards.length; g++){

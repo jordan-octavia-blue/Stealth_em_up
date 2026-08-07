@@ -23,12 +23,14 @@
     "src/physics",
     "src/fog",
     "src/map",
+    "src/ai",
     "src/render/autotile.ts",
     "test/core",
     "test/nav",
     "test/physics",
     "test/fog",
     "test/map",
+    "test/ai",
     "test/render/autotile.test.ts"
   ]
 }

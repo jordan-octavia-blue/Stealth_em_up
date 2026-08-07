@@ -7,6 +7,7 @@ import { gameClock } from '../core/clock';
 import { events } from '../core/events';
 import { nav, PathPriority } from '../nav';
 import { physics } from '../physics';
+import { GuardBrain, GuardState, ai } from '../ai';
 function sprite_guard_wrapper(pixiSprite, hasRiotShield){
     function sprite_guard(hasRiotShield){
         this.path = [];//path applies to AI following a path;
@@ -26,6 +27,25 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         this.accuracy = 50;
         this.knowsHerosFace = false;//if guard knows hero's face, mask becomes irrelevant
         this.currentlySeesHero = false;//updated every loop;
+
+        //Phase 6: a hierarchical FSM + perception replaces the alarmedPre/alarmed/chasing
+        //flag soup (roadmap §5). The brain owns the awareness meter, the decaying memory
+        //and the current GuardState; gameloop_guards feeds it perception each fixed step
+        //and drives the effects off the state it returns. `alarmed` survives as a compat
+        //flag other code still reads (riot-shield bullet check, textures), kept in sync
+        //with the state by the loop.
+        this.brain = new GuardBrain();
+        //Health model (roadmap §5.4): guards get hp and one damage entry point,
+        //`takeDamage`. Default weapon damage one-shots (preserving the current feel) until
+        //Phase 8's data-driven weapon table gives grenades partial damage.
+        this.hp = 100;
+        this.maxHp = 100;
+        //Nearest audible sound this tick, set by the hearing pass in gameloop_guards and
+        //consumed by the brain. Null when the guard heard nothing.
+        this.heardPos = null;
+        //Set true by the path-follow code when the guard reaches the point it was moving
+        //to investigate — drives the INVESTIGATE → SEARCH transition.
+        this.reachedGoal = false;
         this.gun_shot_line.graphics.visible = false;
         this.hasRiotShield = hasRiotShield;
         this.reactionTimeMillis = 500;
@@ -83,10 +103,25 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
             return true;
         };
 
+        //Health model entry point (roadmap §5.4). All damage funnels through here: bullets
+        //(one-shot by default), the bomb, and — in Phase 8 — the frag grenade. `amount`
+        //and `type` come from the caller; the weapon table that sets them lands in Phase 8.
+        this.takeDamage = function(amount, type, fromX, fromY){
+            if(!this.alive)return;
+            this.hp -= amount;
+            if(this.hp <= 0)this.kill(fromX,fromY);
+        };
+
         this.kill = function(){
             //play_sound(sound_unit_die);
             this.sprite_body.texture = (img_guard_dead);
             this.alive = false;
+            this.hp = 0;
+            //The FSM is terminal once dead; the brain stops producing transitions.
+            this.brain.markDead();
+            //An ally death is a morale hit that feeds the squad FLEE utility (roadmap §5.3):
+            //any living guard who could see this spot has now witnessed a death.
+            ai.squad.recordDeath();
             //A corpse is a prop to be dragged, not an obstacle: drop the body out of the
             //physics world so the drag code can move it directly and the living can walk
             //over it, exactly as they did before Phase 4.
@@ -189,16 +224,22 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
 
         };
         
+        //A guard sees a standalone alarming object — in practice a dead body (the hero is
+        //handled by the brain's perception now). Bodies are not covered by the awareness
+        //meter, so this is the one remaining place that seeds an alarm from a sighting: it
+        //records where the body is, telegraphs, then after the reaction delay raises the
+        //squad. The 2 s "alert the others" chain is unchanged.
         this.seeAlarmingObject = function(objectOfAlarm){
             if(!this.alarmedPre && !this.alarmed){
                 // Guards don't react instantly, they need a second to comprehend what they saw
                 // This prevents shield guards from pulling out their shield the moment they see you
                 this.alarmedPre = true;
+                var where = {x:objectOfAlarm.x, y:objectOfAlarm.y};
+                this.brain.adoptBelief(where, {x:0,y:0}, gameClock.now());
+                ai.squad.reportSighting(where, {x:0,y:0}, gameClock.now());
+                ai.raiseSuspicious();
                 gameClock.after(this.reactionTimeMillis, () => {
                     this.becomeAlarmed()
-
-                    this.path = [];//empty path
-                    this.moving = false;//this sprite stop in their tracks when they see otherSprite.
 
                     //in 2 seconds, if this guard is still alive, alert the others.
                     gameClock.after(2000, function(){
@@ -210,18 +251,29 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
                 })
             }
 
-            
+
         };
-        
+
+        //Told of an alarming event (a squad alert, a heard gunshot, a seen body). Raises
+        //the global alert level, adopts the shared belief so this guard heads for the
+        //hero's last-known position without having seen the hero itself, and pushes a calm
+        //guard into an active search. Texture/speed are the immediate visual; the guard
+        //loop is authoritative and keeps them in sync with the FSM state.
         this.becomeAlarmed = function(){
             if(this.alive){
-                //when a guard is told of an alarming event.
                 if(this.knowsHerosFace)this.sprite_body.texture = this.hasRiotShield ? img_guard_riot_knows_face : (img_guard_knows_hero_face);//show that this guard knows your face:
                 else this.sprite_body.texture = this.hasRiotShield ? img_guard_riot_alert : img_guard_alert;
                 this.speed = 3;//speed up when alarmed.
                 this.alarmed = true;
+                ai.raiseAlarmed();
+                var belief = ai.squad.belief;
+                if(belief.pos)this.brain.adoptBelief(belief.pos, belief.vel, gameClock.now());
+                if(this.brain.state === GuardState.Patrol || this.brain.state === GuardState.Suspicious){
+                    this.brain.state = GuardState.Search;
+                    this.brain.stateSince = gameClock.now();
+                }
             }
-        
+
         };
         
         this.get_dragged_parent = this.get_dragged;

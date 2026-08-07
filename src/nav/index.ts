@@ -71,6 +71,7 @@ class Nav {
   private grid: NavGrid | null = null;
   private regionMap: RegionMap | null = null;
   private field: FlowField | null = null;
+  private soundField: FlowField | null = null;
   private fieldRebuilds = 0;
 
   readonly scheduler = new PathScheduler((request) => this.solve(request));
@@ -131,6 +132,9 @@ class Nav {
     this.grid = grid;
     this.regionMap = labelRegions(grid);
     this.field = null;
+    // A fresh grid restarts its own version counter, so a cached field from the previous
+    // map could collide on version number — drop both fields on build.
+    this.soundField = null;
     this.fieldRebuilds = 0;
     this.scheduler.clear();
     return grid;
@@ -141,6 +145,7 @@ class Nav {
     this.grid = null;
     this.regionMap = null;
     this.field = null;
+    this.soundField = null;
     this.scheduler.clear();
   }
 
@@ -247,6 +252,32 @@ class Nav {
     return this.field.distanceAt(cell);
   }
 
+  /**
+   * Cost-weighted nav distance in **pixels** from a sound `source` to a `listener`,
+   * travelling around walls (roadmap §5.2 hearing). One reverse Dijkstra per distinct
+   * source cell, cached (LRU of 1) because sounds cluster — a burst of gunfire is all one
+   * source cell. Returns Infinity when either point is unreachable, so an occluded
+   * listener behind sealed geometry simply never hears it. Multiply distance-field cost
+   * units back to px via the cell size.
+   */
+  hearingDistance(source: Point, listener: Point): number {
+    if (!this.grid) return Infinity;
+    const grid = this.grid;
+    const src = grid.nearestWalkable(grid.indexAtPoint(source.x, source.y));
+    const dst = grid.nearestWalkable(grid.indexAtPoint(listener.x, listener.y));
+    if (src === -1 || dst === -1) return Infinity;
+    if (
+      !this.soundField ||
+      this.soundField.target !== src ||
+      this.soundField.version !== grid.version
+    ) {
+      this.soundField = computeFlowField(grid, src, this.soundField ?? undefined);
+    }
+    const costUnits = this.soundField.distanceAt(dst);
+    if (!Number.isFinite(costUnits)) return Infinity;
+    return costUnits * grid.cellSize;
+  }
+
   // --- dynamic updates ------------------------------------------------------
 
   /**
@@ -275,8 +306,10 @@ class Nav {
     }
     if (!changed) return;
     // Regions and flow fields are re-derived lazily off `grid.version`; a full relabel
-    // of 1600 cells is microseconds, so there is no partial-update cleverness here.
+    // of 1600 cells is microseconds, so there is no partial-update cleverness here. The
+    // sound field is version-checked on read too, but null it here to free the arrays.
     this.field = null;
+    this.soundField = null;
   }
 
   private deposit(event: DangerEvent): void {
