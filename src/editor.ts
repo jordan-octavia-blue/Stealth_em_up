@@ -447,6 +447,9 @@ class Editor {
     this.canvas.addEventListener('pointerdown', (e) => this.onDown(e));
     this.canvas.addEventListener('pointermove', (e) => this.onMove(e));
     window.addEventListener('pointerup', (e) => this.onUp(e));
+    // A cancelled pointer (touch interrupted, OS gesture takeover) never fires pointerup, so
+    // clear the in-progress gesture here instead of leaving paint/drag state stuck.
+    window.addEventListener('pointercancel', () => this.cancelGesture());
     this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
@@ -610,6 +613,23 @@ class Editor {
     this.escapeFrom = null;
     this.panning = false;
     if (changed) this.commit();
+  }
+
+  /** Abandon an in-progress gesture without applying the line/escape it hadn't committed yet. */
+  private cancelGesture(): void {
+    // Freehand paint + object drags already mutated the map (with an undo snapshot pushed at
+    // the start), so keep and save them; the line/escape rectangle only apply on pointerup, so
+    // dropping their state discards them cleanly.
+    const mutated = this.painting || this.dragging;
+    this.painting = false;
+    this.lineMode = false;
+    this.lineStart = null;
+    this.lastPaintCell = null;
+    this.dragging = null;
+    this.escapeFrom = null;
+    this.panning = false;
+    if (mutated) this.commit();
+    else this.draw();
   }
 
   private onWheel(e: WheelEvent): void {
@@ -808,21 +828,37 @@ class Editor {
 
   private wireCameraInspector(index: number): void {
     const rad = (d: string): number => (Number(d) * Math.PI) / 180;
-    const apply = (patch: Partial<CameraObject>): void => {
-      this.pushUndo();
-      updateCamera(this.map, index, patch);
-      this.commit();
-    };
     const min = el<HTMLInputElement>('camMin');
     const max = el<HTMLInputElement>('camMax');
+    // A slider fires `input` continuously while dragging. Update the map + canvas live but do
+    // NOT rebuild the inspector (that would destroy the slider mid-drag), and push a single
+    // undo snapshot per drag rather than one per tick. `change` (drag end) commits once.
+    let dirty = false;
+    const live = (patch: Partial<CameraObject>): void => {
+      if (!dirty) {
+        this.pushUndo();
+        dirty = true;
+      }
+      updateCamera(this.map, index, patch);
+      this.draw();
+      this.scheduleAutosave();
+    };
+    const done = (): void => {
+      if (dirty) {
+        dirty = false;
+        this.commit();
+      }
+    };
     min.addEventListener('input', () => {
       el('minLabel').textContent = min.value;
-      apply({ swivel_min: rad(min.value) });
+      live({ swivel_min: rad(min.value) });
     });
     max.addEventListener('input', () => {
       el('maxLabel').textContent = max.value;
-      apply({ swivel_max: rad(max.value) });
+      live({ swivel_max: rad(max.value) });
     });
+    min.addEventListener('change', done);
+    max.addEventListener('change', done);
     el('delCam').addEventListener('click', () => {
       this.pushUndo();
       deleteSelection(this.map, { type: 'camera', index });
