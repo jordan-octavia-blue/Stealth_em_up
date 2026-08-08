@@ -24,6 +24,7 @@ import {
 } from '../systems/car';
 import { loadMap } from '../map/loader';
 import { DAMAGE_AMOUNT } from '../map/tileset';
+import { mpApplyIncoming, mpCollectOutgoing, isHost as mpIsHost, isClient as mpIsClient } from '../systems/mp';
 // Side-effect import: wires the breach FX + AI listeners onto `cell:destroyed` (roadmap
 // §6.2 pipeline steps 6-7). No exported symbols; importing it once is the whole point.
 import '../systems/breach';
@@ -574,6 +575,36 @@ alarmingObjects = [];//guards will sound alarm if they see an alarming object (d
             currentTexture = img_shell;
             
 }
+//Co-op spawn slots: a small formation around the map's single hero spawn point.
+//Each slot tries its own offset first, then scans the rest so a blocked corner
+//never stacks two heroes on the same pixel.
+function heroSpawnPoint(slot, baseX, baseY){
+    var offsets = [[0,0],[48,0],[0,48],[48,48],[-48,0],[0,-48],[-48,48],[48,-48],[-48,-48]];
+    var start = Math.min(slot, offsets.length - 1);
+    for(var i = 0; i < offsets.length; i++){
+        var o = offsets[(start + i) % offsets.length];
+        var x = baseX + o[0], y = baseY + o[1];
+        if(physics.spotClearForActor(x, y, 14))return {x:x, y:y};
+    }
+    return {x:baseX, y:baseY};
+}
+
+//Create a non-local hero: a ?players=N debug dummy today, a remote player's hero
+//once replication lands. A full sprite_hero_wrapper, so textures, walk animation
+//and the mask-swap all work on it. Only the authoritative side gives it a physics
+//body — on a client, teammates are drawn from network state and walked through.
+function spawnExtraHero(playerId, baseX, baseY){
+    var h = new sprite_hero_wrapper(new PIXI.Sprite(img_hero_body),4,8);
+    h.playerId = playerId;
+    h.isLocal = false;
+    var spot = heroSpawnPoint(playerId, baseX, baseY);
+    h.x = spot.x;
+    h.y = spot.y;
+    if(mpIsHost())physics.addHero(h, h.radius);
+    h.speed = h.speed_walk;
+    return h;
+}
+
 function setup_map(map){
     console.log('map:');
     console.log(map);
@@ -619,12 +650,26 @@ function setup_map(map){
 			hero = new sprite_hero_wrapper(new PIXI.Sprite(img_hero_body),4,8);
 			//hero_end_aim_coord;
 
-            hero.x = map.objects.hero[0];
-            hero.y = map.objects.hero[1];
+            //Multiplayer: `hero` always means "the local player's hero" on every
+            //machine; `heroes` is every hero in the mission (local + remote).
+            //Single-player is simply heroes = [hero].
+            hero.playerId = 0;
+            hero.isLocal = true;
+            var heroSpawn = heroSpawnPoint(0, map.objects.hero[0], map.objects.hero[1]);
+            hero.x = heroSpawn.x;
+            hero.y = heroSpawn.y;
             //dynamic circle, fixedRotation — facing stays a game-logic angle (§3.2)
             physics.addHero(hero, hero.radius);
 			hero.speed = hero.speed_walk;
             hero_drag_target = null; // a special var reserved for when the hero is dragging something.
+            heroes = [hero];
+            //Debug drill (?players=N): spawn N-1 input-less dummy heroes so every
+            //multi-hero code path (guard targeting, per-hero drag, revive) can be
+            //exercised in single-player before any networking exists.
+            var debugPlayers = Math.min(Number(url_queryString["players"]) || 1, 4);
+            for(var p = 1; p < debugPlayers; p++){
+                heroes.push(spawnExtraHero(p, map.objects.hero[0], map.objects.hero[1]));
+            }
 
             
             
@@ -1384,6 +1429,14 @@ function gameloop(deltaTime){
     gameClock.update(deltaTime);
 
     //////////////////////
+    //multiplayer: apply everything that arrived over the network before any
+    //perception or physics runs this tick (remote hero replicas, snapshots,
+    //events). A no-op until a session is live, and always a no-op in
+    //single-player.
+    //////////////////////
+    mpApplyIncoming(deltaTime);
+
+    //////////////////////
     //navigation: decay the danger layer and run queued path searches under the
     //per-frame budget (roadmap §4). Runs before the guards so a path that came in
     //this step is walked this step.
@@ -1620,6 +1673,11 @@ function gameloop(deltaTime){
 
     //wall-destruction debug overlay (materials / hp bars), cycled with the H key
     drawBreachDebug();
+
+    //multiplayer: local hero state is final for this tick (post prepare_for_draw),
+    //so stream it now; the host also sends its world snapshot on schedule. No-op
+    //outside a live session.
+    mpCollectOutgoing(deltaTime);
 
     //The fog mask itself is redrawn once per *rendered* frame, from animate() — it is
     //presentation, and there is nothing to gain from sweeping twice for one picture.
@@ -2040,6 +2098,6 @@ function getMapInfo(subdir, fileName){
 // `window`. It is an ES module now, so the functions below are republished as
 // globals for the not-yet-extracted code that still reads them by bare name.
 // See src/legacy-bridge.ts. Each extraction deletes another line from here.
-Object.assign(window, { getColor, windowSetup, fullscreen, drawBloodTrail, bakeBloodTrail, getUrlVars, removeAllChildren, clearStage, startMenu, startGame, setup_map, animate, reactionTimeout, gameloop_guards, gameloop_security_cams, removeBullet, gameloop_bullets, gameloop_doors, gameloop_dragtarget, gameloop_messages_and_tooltip, gameloop_getawaycar_and_loot, gameloop_alert_animation, pickUpGunDrop, gameloop, updateDebugInfo, newMessage, newFloatingMessage, updateMessage, spawn_backup, spawn_individual_backup, alert_all_guards, unsilenced_gun, setHeroImage, useMask, hero_is_dead, doGunShotEffects, set_latestAlert, setBomb, gameloop_bomb, explodeBomb, plantBomb, drop_gun, killHero, getMapInfo });
+Object.assign(window, { getColor, windowSetup, fullscreen, drawBloodTrail, bakeBloodTrail, getUrlVars, removeAllChildren, clearStage, startMenu, startGame, setup_map, animate, reactionTimeout, gameloop_guards, gameloop_security_cams, removeBullet, gameloop_bullets, gameloop_doors, gameloop_dragtarget, gameloop_messages_and_tooltip, gameloop_getawaycar_and_loot, gameloop_alert_animation, pickUpGunDrop, gameloop, updateDebugInfo, newMessage, newFloatingMessage, updateMessage, spawn_backup, spawn_individual_backup, alert_all_guards, unsilenced_gun, setHeroImage, useMask, hero_is_dead, doGunShotEffects, set_latestAlert, setBomb, gameloop_bomb, explodeBomb, plantBomb, drop_gun, killHero, getMapInfo, heroSpawnPoint, spawnExtraHero });
 
 export {};

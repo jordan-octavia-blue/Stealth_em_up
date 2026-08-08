@@ -213,6 +213,9 @@ declare global {
   var guards: any;
   var gun_drops: any;
   var hero: any;
+  var heroes: any;
+  var heroSpawnPoint: any;
+  var spawnExtraHero: any;
   var hero_drag_target: any;
   var hero_end_aim_coord: any;
   var hero_is_dead: any;
