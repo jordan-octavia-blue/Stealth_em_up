@@ -17,6 +17,7 @@ import { cyclePhysicsDebug } from './physics_debug';
 import { cycleBreachDebug } from './breach_debug';
 import { physics } from '../physics';
 import { isInCar, toggleCar } from './car';
+import { getBindings } from './keybindings';
 
 export function mouseMove(e){
     //Viewport coords, not document coords: camera.getMouse wants the position within the
@@ -41,16 +42,20 @@ export function addKeyHandlers(){
     window.onkeydown = function(e){
         //this function is called every frame that said key is down
         var code = e.keyCode ? e.keyCode : e.which;
+        //Resolve the physical key against the (possibly rebound) control map. Every numeric
+        //keyCode below used to be a hard-coded literal; they now come from keybindings.ts so
+        //the menu's Controls settings can remap them. See src/systems/keybindings.ts.
+        var kb = getBindings();
         //keyinfo[code] = String.fromCharCode(code);
         if(hero.alive && isInCar()){
             //Driving the van: only the car controls respond. Weapons, the bomb, the mask,
             //lockpicking and body-dragging are all unavailable until you get out (E).
-            if(code == 87){keys['w'] = true;}
-            if(code == 65){keys['a'] = true;}
-            if(code == 83){keys['s'] = true;}
-            if(code == 68){keys['d'] = true;}
-            if(code == 32){keys['space'] = true;}//handbrake
-            if(code == 69){if(!keys['e'])toggleCar();keys['e'] = true;}//E: get out
+            if(code == kb.move_up){keys['w'] = true;}
+            if(code == kb.move_left){keys['a'] = true;}
+            if(code == kb.move_down){keys['s'] = true;}
+            if(code == kb.move_right){keys['d'] = true;}
+            if(code == kb.interact){keys['space'] = true;}//handbrake
+            if(code == kb.vehicle){if(!keys['e'])toggleCar();keys['e'] = true;}//get out
         }else if(hero.alive){
             /*
             if(code == 49){hero.changeGun(0);}//key 1
@@ -60,12 +65,12 @@ export function addKeyHandlers(){
             if(code == 53){hero.changeGun(4);}//key 5
             if(code == 54){hero.changeGun(5);}//key 6
             */
-            if(code == 87){keys['w'] = true;}
-            if(code == 65){keys['a'] = true;}
-            if(code == 83){keys['s'] = true;}
-            if(code == 68){keys['d'] = true;}
-            if(code == 80){
-                //key p
+            if(code == kb.move_up){keys['w'] = true;}
+            if(code == kb.move_left){keys['a'] = true;}
+            if(code == kb.move_down){keys['s'] = true;}
+            if(code == kb.move_right){keys['d'] = true;}
+            if(code == kb.spyglass){
+                //spyglass / binoculars
                 hero.spyglass_equipped = !hero.spyglass_equipped;
 
                 if(hero.spyglass_equipped){
@@ -75,7 +80,7 @@ export function addKeyHandlers(){
                 }
 
             }
-            if(code == 71){
+            if(code == kb.draw_weapon){
                 // !keys['g'] makes it so that it will only be called once for a single press of the letter
                 if(!keys['g']){
                     hero.gunOut = !hero.gunOut;
@@ -92,32 +97,32 @@ export function addKeyHandlers(){
                 //'p'
                 pause = !pause;
             }*/
-            if(code == 82){
+            if(code == kb.reload){
                 keys['r'] = true;
                 hero.reload();
             }
-            if(code == 78){
-                //key n: cycle the nav debug overlay (off / paths / regions / danger / flow)
+            if(code == kb.nav_debug){
+                //cycle the nav debug overlay (off / paths / regions / danger / flow)
                 if(!keys['n']){
                     newMessage('Nav overlay: ' + cycleNavDebug());
                 }
                 keys['n'] = true;
             }
-            if(code == 66){
-                //key b: cycle the physics/fog overlay (off / fixtures / occluders / polygon)
+            if(code == kb.physics_debug){
+                //cycle the physics/fog overlay (off / fixtures / occluders / polygon)
                 if(!keys['b']){
                     newMessage('Physics overlay: ' + cyclePhysicsDebug());
                 }
                 keys['b'] = true;
             }
-            if(code == 72){
-                //key h: cycle the wall-destruction overlay (off / materials / hp)
+            if(code == kb.wall_debug){
+                //cycle the wall-destruction overlay (off / materials / hp)
                 if(!keys['h']){
                     newMessage('Wall overlay: ' + cycleBreachDebug());
                 }
                 keys['h'] = true;
             }
-            if(code == 70){
+            if(code == kb.bomb){
                 //plant bomb
                 if(!keys['f'] && !bomb.sprite.visible){
 
@@ -156,7 +161,7 @@ export function addKeyHandlers(){
                 keys['f'] = true;
 
             }
-            if(code == 86){
+            if(code == kb.mask){
                 // !keys['v'] makes it so that it will only be called once for a single press of the letter
                 if(!keys['v']){
                     circProgBar.heroMaskProg(hero.ability_toggle_mask_speed,useMask,!hero.masked);
@@ -165,7 +170,7 @@ export function addKeyHandlers(){
                 }
                 keys['v'] = true;
             }
-            if(code == 16){
+            if(code == kb.sprint){
                 keys['shift'] = true;
                 //cannot sprint while dragging something
                 if(!hero_drag_target){
@@ -173,7 +178,7 @@ export function addKeyHandlers(){
                 }
 
             }
-            if(code == 32){
+            if(code == kb.interact){
                 keys['space'] = true;
                 if(!hero_drag_target){
                     if(!grid.a_door_is_being_unlocked){
@@ -282,11 +287,11 @@ export function addKeyHandlers(){
                 }
 
             }
-            if(code == 69){if(!keys['e'])toggleCar();keys['e'] = true;}//E: get into the van
+            if(code == kb.vehicle){if(!keys['e'])toggleCar();keys['e'] = true;}//get into the van
         }
 
         if(code == 27){
-            //esc
+            //esc — always available, not rebindable
             startMenu();
         }
 
@@ -294,29 +299,32 @@ export function addKeyHandlers(){
     };
     window.onkeyup = function(e){
         var code = e.keyCode ? e.keyCode : e.which;
-        if(code == 87){keys['w'] = false;}
-        if(code == 65){keys['a'] = false;}
-        if(code == 83){keys['s'] = false;}
-        if(code == 68){keys['d'] = false;}
-        if(code == 70){keys['f'] = false;}
-        if(code == 71){keys['g'] = false;}
-        if(code == 69){keys['e'] = false;}
-        if(code == 82){keys['r'] = false;}
-        if(code == 78){keys['n'] = false;}
-        if(code == 66){keys['b'] = false;}
-        if(code == 72){keys['h'] = false;}
-        if(code == 86){
+        //Same (possibly rebound) control map as keydown, so a released key clears the flag
+        //its bound action set. See src/systems/keybindings.ts.
+        var kb = getBindings();
+        if(code == kb.move_up){keys['w'] = false;}
+        if(code == kb.move_left){keys['a'] = false;}
+        if(code == kb.move_down){keys['s'] = false;}
+        if(code == kb.move_right){keys['d'] = false;}
+        if(code == kb.bomb){keys['f'] = false;}
+        if(code == kb.draw_weapon){keys['g'] = false;}
+        if(code == kb.vehicle){keys['e'] = false;}
+        if(code == kb.reload){keys['r'] = false;}
+        if(code == kb.nav_debug){keys['n'] = false;}
+        if(code == kb.physics_debug){keys['b'] = false;}
+        if(code == kb.wall_debug){keys['h'] = false;}
+        if(code == kb.mask){
             //on release of key only
             //if(keys['v'])circProgBar.stop();//stop putting on mask
             keys['v'] = false;
         }
-        if(code == 16){
+        if(code == kb.sprint){
             keys['shift'] = false;
             if(hero_drag_target==null){
                 hero.speed = hero.speed_walk;
             }
         }
-        if(code == 32){
+        if(code == kb.interact){
             keys['space'] = false;
             //if hero was dragging something, drop it. (Don't drop a guard while he's being choked
             if(hero_drag_target && !hero_drag_target.alive){

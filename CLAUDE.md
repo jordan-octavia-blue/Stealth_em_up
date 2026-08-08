@@ -13,13 +13,22 @@ Guidance for working in this repo. Start with `README.md` (how to run, layout) a
 
 ## Controls
 
-The keyboard/mouse handlers are the single source of truth — `src/systems/input.ts`
-(`addKeyHandlers`), with the debug-overlay cycles in `src/systems/nav_debug.ts`,
-`src/systems/physics_debug.ts`, and `src/systems/breach_debug.ts`.
+Keyboard keys are rebindable. `src/systems/keybindings.ts` is the single source of truth
+for which physical key triggers which action: `KEY_ACTIONS` lists every rebindable action
+with its default `keyCode`, and the stored overrides live in `localStorage`. The keyboard
+handlers — `src/systems/input.ts` (`addKeyHandlers`) — resolve each pressed key through
+`getBindings()` (never a hard-coded `keyCode`), with the debug-overlay cycles in
+`src/systems/nav_debug.ts`, `src/systems/physics_debug.ts`, and
+`src/systems/breach_debug.ts`. To add or change a control, edit `KEY_ACTIONS` and add the
+matching `code == kb.<id>` check in `input.ts`.
 
-The player-facing list of controls lives in the menu (`menu.html`, the "Controls" screen).
-When you add, remove, or rebind a key in `input.ts` — including the bomb (`F`) and the debug
-overlays (`N` / `B` / `H`) — update that menu list to match so the two never drift apart.
+The player-facing Controls list (in the menu's Settings → Controls screen) is generated
+from `KEY_ACTIONS`, so it can't drift from `input.ts`. Mouse buttons, the wheel zoom and
+Esc are deliberately NOT rebindable (they aren't keyboard keys) and are shown as a fixed
+list. The menu itself — main screen, mission select, settings, stats, credits — is
+`menu.html` + `src/menu/`, a self-contained port of the Some of You May Die main menu
+(view switching via a `menu-{name}` body class, settings persisted through
+`src/menu/storage.ts`'s `OPTIONS` blob).
 
 ## How and why guards get alerted
 

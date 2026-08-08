@@ -1,653 +1,708 @@
 <!DOCTYPE HTML>
 <html>
 <head>
-    <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
-    <meta content="utf-8" http-equiv="encoding">
-	<title>STEALTH 'em UP</title>
-	<style>
-        *{
-        font-family: 'Roboto', sans-serif;
-        }
-        body{
-            margin: 0px;
-            background-image: url("icons/grimly.png");
-            background-repeat: no-repeat;
-            background-size: cover;
-            background-color: #d9ddec;
-        }
-        canvas {
-            padding-left: 0;
-            padding-right: 0;
-            margin-left: auto;
-            margin-right: auto;
-            display: block;
-        
-        }
-        #stickyHeader{
-            position:fixed;
-            left:0px;
-            top:0px;
-            width:100%;
-            height:40px;
-            background:#afbcec;
+  <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+  <meta content="utf-8" http-equiv="encoding">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>STEALTH 'em UP</title>
+  <style>
+    /*
+     * Menu styling for STEALTH 'em UP.
+     *
+     * Structure and interaction are ported from Some of You May Die's main menu: a single
+     * #main-menu container holding sibling `.view view-{name}` blocks, with exactly one
+     * shown at a time via a `menu-{name}` class on <body>. The look is a self-contained
+     * dark + gold theme (SoYMD's border-image button skins depend on art this project
+     * doesn't ship, so the skin is reproduced with plain CSS instead).
+     */
+    * {
+      box-sizing: border-box;
+      font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
+    }
 
-        
-        }
-        .headerButton {
-            height:inherit;
-            float:left;
-            padding: 0 20px 0 20px;
-        }
-        .button2{
-            cursor:pointer;
-            /*disable drag to select text*/
-            -webkit-touch-callout: none;
-            -webkit-user-select: none;
-            -khtml-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-            user-select: none;
+    :root {
+      --bg: #15171d;
+      --panel: #1e212a;
+      --panel-2: #252935;
+      --ink: #e9e7df;
+      --ink-dim: #a7a99f;
+      --gold: #d7ad51;
+      --gold-bright: #ecc766;
+      --gold-deep: #8f7126;
+      --line: #363b47;
+      --blue: #3f7fbf;
+    }
 
-            background: #3498db;
-            background-image: -webkit-linear-gradient(top, #3498db, #2980b9);
-            background-image: -moz-linear-gradient(top, #3498db, #2980b9);
-            background-image: -ms-linear-gradient(top, #3498db, #2980b9);
-            background-image: -o-linear-gradient(top, #3498db, #2980b9);
-            background-image: linear-gradient(to bottom, #3498db, #2980b9);
-            font-family: Arial;
-            color: #ffffff;
-            font-size: 20px;
-            text-decoration: none;
-        
-        }
-        .button2.button2clickable:hover {
-            background: #3cb0fd;
-            text-decoration: none;
-        }
-        .button2.button2clickable:active {
-            background: #3cb0fd;
-            background-image: -webkit-linear-gradient(top, #3498db, #3cb0fd);
-            background-image: -moz-linear-gradient(top, #3498db, #3cb0fd);
-            background-image: -ms-linear-gradient(top, #3498db, #3cb0fd);
-            background-image: -o-linear-gradient(top, #3498db, #3cb0fd);
-            background-image: linear-gradient(to bottom, #3498db, #3cb0fd);
-            text-decoration: none;
-        }
-        .headerButton>span{
-            display: table-cell;
-            height: 40px;
-            vertical-align: middle; 
-        }
-        .body_content{
-            margin-top:40px;
-        }
-        
-        #footer{
-            position:fixed;
-            left:0px;
-            bottom:0px;
-            /*height:104px;*/
-            width:100%;
-            background:#afbcec;
-        }
-        /* Für ie6*/
-        * html #footer{
-            position:absolute;
-            top:expression((0-(footer.offsetHeight)+(document.documentElement.clientHeight ? document.documentElement.clientHeight : document.body.clientHeight)+(ignoreMe = document.documentElement.scrollTop ? document.documentElement.scrollTop : document.body.scrollTop))+'px');
-        }	
-        
-        .btn {
-            border: none;
-            font-family: inherit;
-            font-size: inherit;
-            color: inherit;
-            background: none;
-            cursor: pointer;
-            padding: 25px 32px;
-            /*width: 15%;
-            height: 80%;*/
-            display: inline-block;
-            margin: 15px 8px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-weight: 700;
-            outline: none;
-            position: relative;
-            -webkit-transition: all 0.3s;
-            -moz-transition: all 0.3s;
-            transition: all 0.3s;
-        }
-        .btn-1 {
-            border: 3px solid #4c5267;
-            color: #4c5267;
-        }
+    html, body {
+      height: 100%;
+    }
 
-        /* Button 1a */
-        .currentMenuItem,
-        .btn-1a:hover,
-        .btn-1a:active {
-            color: #afbcec;
-            background: #4c5267;
-        }
-        
-        .levelSelect{
-            margin-bottom: 0px; 
-        }
-        #datatablesdiv tr { cursor: pointer; cursor: hand; }
-        
-        #mc_embed_signup{background:#fff; font:14px Helvetica,Arial,sans-serif;  width:390px;}
-        
-	</style>
-    <link href='http://fonts.googleapis.com/css?family=Roboto' rel='stylesheet' type='text/css'>
-    
-    <script src="https://code.jquery.com/jquery-2.1.1.min.js"></script>
-    
-    <link href="//cdn.datatables.net/1.10.4/css/jquery.dataTables.min.css" rel="stylesheet" type="text/css">
-    <script src="//cdn.datatables.net/1.10.4/js/jquery.dataTables.min.js"></script>
-    
-    <script src="/bin/pixi.js"></script>
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #0f1116;
+      overflow: hidden;
+      -webkit-user-select: none;
+      user-select: none;
+    }
 
-    <!-- The achievements panel reads the jo_store_* helpers; loading them as a module
-         keeps this page on the same source as the game (see src/menu.ts). -->
-    <script type="module" src="/src/menu.ts"></script>
+    #main-menu {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        linear-gradient(rgba(15, 17, 22, 0.86), rgba(15, 17, 22, 0.94)),
+        url("icons/grimly.png") center / cover no-repeat;
+      background-color: var(--bg);
+    }
+
+    /* --- View switching -------------------------------------------------- */
+    #main-menu .view {
+      display: none;
+      width: min(1040px, 94vw);
+      max-height: 92vh;
+    }
+
+    body.menu-main #main-menu .view-main,
+    body.menu-play #main-menu .view-play,
+    body.menu-settings #main-menu .view-settings,
+    body.menu-achievements #main-menu .view-achievements,
+    body.menu-credits #main-menu .view-credits {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* --- Buttons (dark/gold skin) --------------------------------------- */
+    #main-menu .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+      padding: 12px 22px;
+      min-width: 160px;
+      color: var(--ink);
+      background: linear-gradient(180deg, var(--panel-2), var(--panel));
+      border: 2px solid var(--line);
+      border-radius: 6px;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      text-align: center;
+      transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.05s;
+    }
+
+    #main-menu .btn:hover {
+      border-color: var(--gold);
+      color: var(--gold-bright);
+      background: linear-gradient(180deg, #2c3140, #232733);
+    }
+
+    #main-menu .btn:active {
+      transform: translateY(1px);
+    }
+
+    #main-menu .btn.active {
+      border-color: var(--gold);
+      color: #1a1206;
+      background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+    }
+
+    #main-menu .btn.btn-blue {
+      border-color: #2f5f90;
+      color: #f2f7ff;
+      background: linear-gradient(180deg, #3f7fbf, #2f5f90);
+    }
+
+    #main-menu .btn.btn-blue:hover {
+      border-color: var(--gold-bright);
+      background: linear-gradient(180deg, #4a8fd0, #356aa0);
+      color: #fff;
+    }
+
+    /* --- Main view ------------------------------------------------------- */
+    .view-main #main-menu-inner {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 34px;
+    }
+
+    .game-logo {
+      margin: 0;
+      font-size: clamp(46px, 9vw, 92px);
+      font-weight: 900;
+      letter-spacing: 4px;
+      line-height: 0.92;
+      color: var(--ink);
+      text-shadow: 0 4px 0 #000, 0 0 26px rgba(215, 173, 81, 0.28);
+      text-align: center;
+    }
+
+    .game-logo span {
+      color: var(--gold);
+      display: inline-block;
+      margin: 0 8px;
+      font-size: 0.5em;
+      vertical-align: middle;
+      transform: rotate(-6deg);
+    }
+
+    .tagline {
+      margin-top: 10px;
+      text-align: center;
+      color: var(--ink-dim);
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      font-size: 15px;
+    }
+
+    .menu-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      width: 300px;
+    }
+
+    .menu-buttons .btn {
+      width: 100%;
+    }
+
+    /* --- Shared view header --------------------------------------------- */
+    .view-header {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      width: 100%;
+      padding: 6px 4px 16px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 18px;
+    }
+
+    .view-header h2 {
+      margin: 0;
+      font-size: 26px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--gold);
+    }
+
+    .view-header .btn {
+      min-width: 0;
+      padding: 8px 16px;
+      font-size: 15px;
+    }
+
+    /* --- Scroll areas ---------------------------------------------------- */
+    .scrollable {
+      overflow-y: auto;
+      width: 100%;
+    }
+
+    .scrollable::-webkit-scrollbar {
+      width: 0.5em;
+    }
+
+    .scrollable::-webkit-scrollbar-thumb {
+      background-color: var(--gold-deep);
+      border-radius: 3px;
+      outline: 1px solid #313131;
+    }
+
+    /* --- Play / Mission select ------------------------------------------ */
+    .view-play {
+      background: rgba(20, 22, 28, 0.72);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 24px 28px;
+    }
+
+    .mission-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      max-height: 64vh;
+    }
+
+    #main-menu .mission-card.btn {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+      text-transform: none;
+      text-align: left;
+      padding: 18px 22px;
+      width: 100%;
+    }
+
+    .mission-name {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--gold-bright);
+    }
+
+    #main-menu .mission-card.btn:hover .mission-name {
+      color: var(--gold-bright);
+    }
+
+    .mission-desc {
+      font-size: 14px;
+      font-weight: 400;
+      color: var(--ink-dim);
+      letter-spacing: 0.3px;
+    }
+
+    /* --- Settings -------------------------------------------------------- */
+    .view-settings {
+      background: rgba(20, 22, 28, 0.78);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      height: 82vh;
+    }
+
+    #settings-container {
+      display: flex;
+      flex-direction: row;
+      width: 100%;
+      height: 100%;
+    }
+
+    #settings-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 210px;
+      flex: 0 0 210px;
+      padding: 20px 16px;
+      border-right: 1px solid var(--line);
+      background: rgba(0, 0, 0, 0.18);
+    }
+
+    #settings-sidebar .btn {
+      width: 100%;
+    }
+
+    .settings-nav-btn {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      padding: 11px 16px;
+      border: 2px solid transparent;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .settings-nav-btn:hover {
+      color: var(--ink);
+      background: rgba(215, 173, 81, 0.12);
+    }
+
+    .settings-nav-btn.active {
+      color: #1a1206;
+      background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+    }
+
+    #settings-content {
+      flex: 1 1 auto;
+      padding: 24px 30px;
+    }
+
+    .settings-section {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .settings-section h2 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--gold);
+    }
+
+    .settings-help {
+      margin: 0;
+      color: var(--ink-dim);
+      font-size: 14px;
+    }
+
+    .settings-field {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+      max-width: 420px;
+    }
+
+    .settings-field label {
+      color: var(--ink-dim);
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--gold);
+      cursor: pointer;
+    }
+
+    /* --- Keybindings ----------------------------------------------------- */
+    #keybindings-list {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      width: 100%;
+    }
+
+    .keybind-group h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 6px;
+    }
+
+    .keybind-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 6px 0;
+    }
+
+    .keybind-label {
+      font-size: 15px;
+      color: var(--ink);
+    }
+
+    #main-menu .btn.btn-key {
+      min-width: 118px;
+      padding: 8px 14px;
+      font-size: 15px;
+      text-transform: none;
+      font-family: 'Courier New', monospace;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+
+    .keybind-fixed {
+      min-width: 118px;
+      padding: 8px 14px;
+      font-size: 15px;
+      font-family: 'Courier New', monospace;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: var(--ink-dim);
+      text-align: center;
+    }
+
+    .fixed-controls {
+      opacity: 0.85;
+    }
+
+    #main-menu .btn.btn-key.listening {
+      border-color: var(--gold-bright);
+      color: var(--gold-bright);
+      background: rgba(215, 173, 81, 0.14);
+      animation: pulse 1s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.55; }
+    }
+
+    /* --- Stats & achievements ------------------------------------------- */
+    .view-achievements {
+      background: rgba(20, 22, 28, 0.78);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 24px 28px;
+      height: 82vh;
+    }
+
+    .stats-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 26px;
+      max-height: 70vh;
+    }
+
+    .stats-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-width: 460px;
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .stat-label {
+      color: var(--ink-dim);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-size: 14px;
+    }
+
+    .stat-value {
+      color: var(--gold-bright);
+      font-weight: 700;
+    }
+
+    .achievements-panel {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 14px;
+    }
+
+    .achievement-card {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 14px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .achievement-card img {
+      width: 46px;
+      height: 46px;
+      object-fit: contain;
+      flex: 0 0 auto;
+    }
+
+    .achievement-card .ach-name {
+      font-weight: 700;
+      color: var(--gold);
+      letter-spacing: 0.5px;
+    }
+
+    .achievement-card .ach-desc {
+      font-size: 13px;
+      color: var(--ink-dim);
+    }
+
+    /* --- Credits --------------------------------------------------------- */
+    .view-credits {
+      background: rgba(20, 22, 28, 0.78);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 24px 28px;
+      height: 70vh;
+    }
+
+    .credits {
+      max-height: 54vh;
+      line-height: 1.7;
+      color: var(--ink);
+    }
+
+    .credits h3 {
+      color: var(--gold);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin: 18px 0 6px;
+    }
+
+    .credits a {
+      color: var(--gold-bright);
+    }
+
+    /* --- Toast ----------------------------------------------------------- */
+    #menu-toast {
+      position: fixed;
+      left: 50%;
+      bottom: 32px;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--panel-2);
+      color: var(--ink);
+      border: 1px solid var(--gold);
+      border-radius: 6px;
+      padding: 12px 20px;
+      font-size: 15px;
+      max-width: 80vw;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 50;
+    }
+
+    #menu-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
 </head>
-    <script>
-        function finishedloading(text){
-            console.log('Finished loading: ' + text);
-        }
-        
-        function getUrlVars()
-        {
-            var vars = [], hash;
-            var hashes = window.location.href.slice(window.location.href.indexOf('?') + 1).split('&');
-            for(var i = 0; i < hashes.length; i++)
-            {
-                hash = hashes[i].split('=');
-                vars.push(hash[0]);
-                vars[hash[0]] = hash[1];
-            }
-            return vars;
-        }
-    </script>
-    <body onload="finishedloading('body');">
-    <div id="stickyHeader">
-        <div class="headerButton button2">
-            <span>Missions Remaining:</span>
+
+<body class="menu-main">
+  <div id="main-menu">
+
+    <!-- Main menu ------------------------------------------------------- -->
+    <div class="view view-main">
+      <div id="main-menu-inner">
+        <div class="logo-block">
+          <h1 class="game-logo">STEALTH<span>'em</span>UP</h1>
+          <div class="tagline">Rob 'em Blind</div>
         </div>
-        <div class="headerButton button2 button2clickable" onclick="showMenuScreen('levelSelect');">
-            <span>Mission Select</span>
-            
+        <div class="menu-buttons">
+          <div class="btn btn-blue" data-view="play">Play</div>
+          <div class="btn" data-view="settings">Settings</div>
+          <div class="btn" data-view="achievements">Stats</div>
+          <div class="btn" data-view="credits">Credits</div>
         </div>
-        <div class="headerButton button2 button2clickable" onclick="showMenuScreen('startScreen');">
-            <span>Controls</span>
-            
-        </div>
+      </div>
     </div>
-    
-    <div id="canvas_holder"></div>
-    <!-- This page used to <script>-load the whole game here purely to warm the browser
-         cache before game.html asked for the same files. The game is a single bundled
-         module entry now, so there is nothing left to preload. -->
-    <script>
-      (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
-      (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
-      m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
-      })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
 
-      ga('create', 'UA-56798370-1', 'auto');
-      ga('send', 'pageview');
-
-    </script>
-            
-    <div id="startScreen" class="body_content" align="right">
-        <!--<div><button type="button" class="btn btn-1 btn-1a" onclick="location.href='/game.html?volume=0.0'">Start Game (Muted)</button></div>-->
-
-        
-        <table>
-        <tr>
-            <td>
-            <b>Controls:</b>
-            </td>
-            <td>
-            </td>
-        </tr>
-        <tr></tr>
-        <tr>
-            <td>
-            Movement:
-            </td>
-            <td>
-            W A S D
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Put On Mask:
-            </td>
-            <td>
-            V
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Draw Weapon:
-            </td>
-            <td>
-            G
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Place / Detonate Explosive
-            </td>
-            <td>
-            F
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Reload:
-            </td>
-            <td>
-            R
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Switch Weapon
-            </td>
-            <td>
-            1-6
-            </td>
-        </tr>
-        <tr>
-            
-            <td>
-            Shoot (While Weapon is Drawn):  
-            </td>
-            <td>
-            Left Click
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Lock-pick Door:
-            </td>
-            <td>
-            Hold Space
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Interact:
-            </td>
-            <td>
-            Space
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Drag Body:
-            </td>
-            <td>
-            Hold Space
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Zoom:
-            </td>
-            <td>
-            Mouse Wheel
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Choke Out Guard:
-            </td>
-            <td>
-            Space
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Sprint:
-            </td>
-            <td>
-            Hold Shift
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Spyglass / Binoculars:
-            </td>
-            <td>
-            P
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Pick Up Gun:
-            </td>
-            <td>
-            Right Click
-            </td>
-        </tr>
-
-        </table>
-        <br><br><br>
-        <table>
-        <tr>
-            <td>
-            <b>Bomb (F):</b>
-            </td>
-            <td>
-            </td>
-        </tr>
-        <tr></tr>
-        <tr>
-            <td>
-            Timed bomb: plant with F, detonates on a 5s fuse.
-            </td>
-            <td>
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Remote bomb: press F to plant, press F again to detonate.
-            </td>
-            <td>
-            </td>
-        </tr>
-        </table>
-        <br><br><br>
-        <table>
-        <tr>
-            <td>
-            <b>Debug Overlays:</b>
-            </td>
-            <td>
-            </td>
-        </tr>
-        <tr></tr>
-        <tr>
-            <td>
-            Nav / Pathfinding (off / paths / regions / danger / flow):
-            </td>
-            <td>
-            N
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Physics / Fog (off / fixtures / occluders / polygon):
-            </td>
-            <td>
-            B
-            </td>
-        </tr>
-        <tr>
-            <td>
-            Wall Destruction (off / materials / hp):
-            </td>
-            <td>
-            H
-            </td>
-        </tr>
-        </table>
-        <br><br><br>
-        <table>
-        <tr>
-            <td>
-            -Grey Tiles are restricted guards will <br> automatically attack you if they see you <br> standing on a grey tile.
-            </td>
-        </tr>
-        <tr>
-        </tr>
-        <tr>
-        </tr>
-        <tr>
-            <td>
-            -Brown Tiles are tables.  Enemies can <br>shoot and see past them, but cannot <br>move past them.
-            </td>
-        </tr>
-        <tr>
-        </tr>
-        <tr>
-        </tr>
-        <tr>
-            <td>
-            -Black Tiles are walls.
-            </td>
-        </tr>
-        </table>
-
-        <!---<div><video autoplay loop muted width="400" height="300">
-            <source src="test.webm" type='video/webm; codecs="vp8, vorbis"'>
-        </video></div>-->
-        
-        </table>
-        <br><br><br>
-        
-
- 
-
+    <!-- Mission select -------------------------------------------------- -->
+    <div class="view view-play">
+      <div class="view-header">
+        <div class="btn" data-view="main">&#x2190; Back</div>
+        <h2>Mission Select</h2>
+      </div>
+      <div id="mission-list" class="mission-list scrollable"></div>
     </div>
-    <!--
-    <div class="btn btn-1 btn-1a" style="display: block; width: 300px; height: 120px;" onclick="location.href='./game.html?volume=1.0&level=diamondStore'">
-            <h1 class="levelSelect" align="center">Diamond Store</h1>
-        </div>
-        <div class="btn btn-1 btn-1a" style="display: block; width: 300px; height: 120px;" onclick="location.href='./game.html?volume=1.0&level=bank1'">
-            <h1 class="levelSelect" align="center">International Bank</h1>
-        </div>
-    -->
-    <div id="levelSelect" class="body_content" align="right">
-        <div id="datatablesdiv" style="max-width:70%;margin:50px;background-color: rgba(255,255,255,0.9);">
-        </div>
-        
-    </div>
-    <div id="achievements" class="body_content" align="right">
-        
-        <table>
-        <tr>
-            <td>
-                <div id="playerStats"></div>
-            </td>
-            <td>
-            </td>
-        </tr>
-        <tr>
-            <td>
-                <p><b>Ghost</b> <br> Never Seen</p>
-            </td>
-            <td>
-            <img src="icons/ghost.png">
-            </td>
-        </tr>
-        <tr>
-            <td>
-                <p><b>Pacifist</b> <br> None Dead</p>
-            </td>
-            <td>
-            <img src="icons/peace.png">
-            </td>
-        </tr>
-        <tr>
-            <td>
-                <p><b>Flawless</b> <br> Never Seen, None Dead</p>
-            </td>
-            <td>
-            <img src="icons/flawless.png">
-            </td>
-        </tr>
-        <tr>
-            <td>
-                <p><b>Speedy</b> <br> Completed Quickly</p>
-            </td>
-            <td>
-            <img src="icons/speedy.png">
-            </td>
-        </tr>
-        <tr>
-            <td>
-                <p><b>Never Give Up</b> <br> Completed After Police <br> Backup Arrives</p>
-            </td>
-            <td>
-                <img src="icons/ngu.png">
-            </td>
-        </tr>
-        </table>
-    </div>
-    <div align="right" id="mailingList" class="body_content" >
-        <!-- Begin MailChimp Signup Form -->
-        <link href="//cdn-images.mailchimp.com/embedcode/classic-081711.css" rel="stylesheet" type="text/css">
 
-        <div id="mc_embed_signup">
-        <form action="//triagegame.us9.list-manage.com/subscribe/post?u=f089bff381b5dde5efe54f853&amp;id=8917d648ec" method="post" id="mc-embedded-subscribe-form" name="mc-embedded-subscribe-form" class="validate" target="_blank" novalidate>
-            <div id="mc_embed_signup_scroll">
-            <h2>Mailing List - Only used for major news</h2>
-        <div class="mc-field-group">
-            <label for="mce-EMAIL">Email Address </label>
-            <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL">
+    <!-- Settings -------------------------------------------------------- -->
+    <div class="view view-settings">
+      <div id="settings-container">
+        <div id="settings-sidebar">
+          <div class="btn" data-view="main">&#x2190; Back</div>
+          <div class="settings-nav-btn active" data-fn="menu-act" data-act="settings-category"
+            data-value="controls">Controls</div>
+          <div class="settings-nav-btn" data-fn="menu-act" data-act="settings-category" data-value="audio">Audio</div>
+          <div class="settings-nav-btn" data-fn="menu-act" data-act="settings-category" data-value="other">Other</div>
         </div>
-            <div id="mce-responses" class="clear">
-                <div class="response" id="mce-error-response" style="display:none"></div>
-                <div class="response" id="mce-success-response" style="display:none"></div>
-            </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
-            <div style="position: absolute; left: -5000px;"><input type="text" name="b_f089bff381b5dde5efe54f853_8917d648ec" tabindex="-1" value=""></div>
-            <div class="clear"><input type="submit" value="Subscribe" name="subscribe" id="mc-embedded-subscribe" class="button"></div>
+        <div id="settings-content" class="scrollable">
+
+          <!-- Controls / keybindings -->
+          <div class="settings-section" data-settings-category="controls">
+            <h2>Controls</h2>
+            <p class="settings-help">Click a key, then press the new key to rebind it. Press Esc to cancel. Bindings are
+              saved automatically and used the next time you play.</p>
+            <div id="keybindings-list"></div>
+            <div class="btn" data-fn="menu-act" data-act="reset-keybinds">Reset Controls</div>
+            <div class="keybind-group fixed-controls">
+              <h3>Mouse &amp; Fixed</h3>
+              <div class="keybind-row"><span class="keybind-label">Shoot (while weapon drawn)</span><span
+                  class="keybind-fixed">Left Click</span></div>
+              <div class="keybind-row"><span class="keybind-label">Pick Up Gun</span><span class="keybind-fixed">Right
+                  Click</span></div>
+              <div class="keybind-row"><span class="keybind-label">Zoom</span><span class="keybind-fixed">Mouse
+                  Wheel</span></div>
+              <div class="keybind-row"><span class="keybind-label">Menu</span><span
+                  class="keybind-fixed">Esc</span></div>
             </div>
-        </form>
+          </div>
+
+          <!-- Audio -->
+          <div class="settings-section" data-settings-category="audio" style="display:none">
+            <h2>Volume</h2>
+            <div class="settings-field">
+              <label for="volume-total">Master Volume</label>
+              <input id="volume-total" type="range" min="0" max="100" />
+            </div>
+          </div>
+
+          <!-- Other -->
+          <div class="settings-section" data-settings-category="other" style="display:none">
+            <h2>Other</h2>
+            <p class="settings-help">Reset everything — options and rebound controls — back to their defaults.</p>
+            <div class="btn" data-fn="menu-act" data-act="reset-all-settings">Reset All Settings</div>
+          </div>
+
         </div>
-
-        <!--End mc_embed_signup-->
-       
+      </div>
     </div>
-    <div id="feedback" class="body_content" align="right">
-        <iframe src="https://docs.google.com/forms/d/1g9iHmcgLgr4Ob_XtQXY8P5cIKpV4QaSOcXAFXrAADvs/viewform?embedded=true" width="760" height="1000" frameborder="0" marginheight="0" marginwidth="0">Loading...</iframe>
-    </div>
-    <script>
 
-        var test;
-        //pull level maps from server
-        //fill level select with names of all maps:
-        //get info from php:
-        function getListOfMapNames(){
-            var fileNames;
-            var mapData = [];
-            var oReq = new XMLHttpRequest(); //New request object
-            oReq.onload = function() {
-                //This is where you handle what to do with the response.
-                //The actual data is found on this.responseText
-                console.log(this.responseText); 
-                console.log("NOTE: " + "\"Uncaught SyntaxError: Unexpected token <\" will result if I run this on server without php");
-                fileNames = JSON.parse(this.responseText);
-                dataSet = [];
-                for(var i = 0; i < fileNames.length; i++){
-                    fileNames[i] = fileNames[i].slice(0,-6);
-                    dataSet[i] = [fileNames[i],'...','...','...','...'];
-                    console.log("get file: " + fileNames[i]);
-                }
-                
-                //Make and fill datatable
-                $('#datatablesdiv').html( '<table cellpadding="0" cellspacing="0" border="0" class="display" id="example"></table>' );
-             
-                $('#example').dataTable( {
-                    "data": dataSet,
-                    "columns": [
-                        { "title": "Level Name" },
-                        { "title": "Rating" },
-                        { "title": "Achievements" },
-                        { "title": "Other", "class": "center" },
-                        { "title": "Other", "class": "center" }
-                    ]
-                } ); 
-                
-                //set each datatable row to link to the map
-                $("#datatablesdiv tr").click(function(){
-                    location.href = './game.html?volume=1.0&level=' + $(this).find(".sorting_1")[0].innerHTML;
-                });
-            };
-            oReq.open("get", "maps/get-data.php", true);
-            //                               ^ Don't block the rest of the execution.
-            //                                 Don't wait until the request finishes to 
-            //                                 continue.
-            oReq.send();
-        }
-        getListOfMapNames();
-        function updateStats(){
-            var wins = jo_store_get("wins");
-            var loses = jo_store_get("loses");
-            var guardsShot = jo_store_get("guardsShot");
-            var guardsChoked = jo_store_get("guardsChoked");
-            $("#playerStats").empty();
-            $("#playerStats").append("<b>Statistics<b>");
-            $("#playerStats").append("<br>Wins: " + wins);
-            $("#playerStats").append("<br>Loses: " + loses);
-            $("#playerStats").append("<br>Guards Shot: " + guardsShot);
-            $("#playerStats").append("<br>Guards Choked: " + guardsChoked);
-        }
-        function showMenuScreen(id){
-            //window.history.pushState("object or string", "Title", "./?m=" + id);
-        
-            $("#startScreen").hide();
-            $("#levelSelect").hide();
-            $("#achievements").hide();
-            $("#mailingList").hide();
-            $("#feedback").hide();
-            
-            $("#"+id).show();
-            history.pushState({}, id, "#id");
-            
-            //set no buttons to currentMenuItem
-            $("#button_startScreen").removeClass("currentMenuItem");
-            $("#button_levelSelect").removeClass("currentMenuItem");
-            $("#button_achievements").removeClass("currentMenuItem");
-            $("#button_mailingList").removeClass("currentMenuItem");
-            $("#button_feedback").removeClass("currentMenuItem");
-            //Set the currentMenuItem
-            $("#button_"+id).addClass("currentMenuItem");
-        
-        }
-        
-        //a refresh or regular navigation to the page will show the correct div.
-        if(location.hash.substring(0,1)=='#')showMenuScreen(location.hash.substring(1));
-        else showMenuScreen("startScreen");
-        //no longer used now that is use location.hash
-        /*var url_queryString = getUrlVars();
-        if(url_queryString["m"]){
-            var menuItem = url_queryString["m"];
-            console.log('menu: ' + menuItem.substr(menuItem.length -1));
-            if(menuItem.substr(menuItem.length -1) == "/")menuItem = menuItem.slice(0,-1);
-            showMenuScreen(menuItem);
-        }else{
-            //start out only showing startscreen
-            showMenuScreen("startScreen");
-        }*/
-        //todo test:
-        var dataSet = [
-        ['BANK_1','...','...','...','...'],
-        ['DIAMOND_STORE','...','...','...','...'],
-        ['aPrefilled without php','...','...','...','...'],
-        ['Level4','...','...','...','...'],
-        ['Level5','...','...','...','...'],
-        ['Level6','...','...','...','...'],
-        ['Level7','...','...','...','...'],
-        ['Level8','...','...','...','...'],
-        ['Level9','...','...','...','...'],
-    ];
-     
-    </script>
-    <script> 
-    //browser update check
-    var $buoop = {c:2}; 
-    function $buo_f(){ 
-     var e = document.createElement("script"); 
-     e.src = "//browser-update.org/update.js"; 
-     document.body.appendChild(e);
-    };
-    try {document.addEventListener("DOMContentLoaded", $buo_f,false)}
-    catch(e){window.attachEvent("onload", $buo_f)}
-    </script> 
-	</body>
+    <!-- Stats & achievements -------------------------------------------- -->
+    <div class="view view-achievements">
+      <div class="view-header">
+        <div class="btn" data-view="main">&#x2190; Back</div>
+        <h2>Stats &amp; Achievements</h2>
+      </div>
+      <div class="stats-wrap scrollable">
+        <div id="player-stats" class="stats-panel"></div>
+        <div class="achievements-panel">
+          <div class="achievement-card">
+            <img src="icons/ghost.png" alt="">
+            <div>
+              <div class="ach-name">Ghost</div>
+              <div class="ach-desc">Complete a mission without ever being seen.</div>
+            </div>
+          </div>
+          <div class="achievement-card">
+            <img src="icons/peace.png" alt="">
+            <div>
+              <div class="ach-name">Pacifist</div>
+              <div class="ach-desc">Complete a mission without killing anyone.</div>
+            </div>
+          </div>
+          <div class="achievement-card">
+            <img src="icons/flawless.png" alt="">
+            <div>
+              <div class="ach-name">Flawless</div>
+              <div class="ach-desc">Never seen, none dead.</div>
+            </div>
+          </div>
+          <div class="achievement-card">
+            <img src="icons/speedy.png" alt="">
+            <div>
+              <div class="ach-name">Speedy</div>
+              <div class="ach-desc">Complete a mission quickly.</div>
+            </div>
+          </div>
+          <div class="achievement-card">
+            <img src="icons/ngu.png" alt="">
+            <div>
+              <div class="ach-name">Never Give Up</div>
+              <div class="ach-desc">Complete a mission after police backup arrives.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Credits --------------------------------------------------------- -->
+    <div class="view view-credits">
+      <div class="view-header">
+        <div class="btn" data-view="main">&#x2190; Back</div>
+        <h2>Credits</h2>
+      </div>
+      <div class="credits scrollable">
+        <h3>Stealth 'em Up</h3>
+        <p>A top-down stealth heist game. Mask up, pick the locks, crack the vault, and get
+          out before the guards raise the alarm.</p>
+        <h3>Development</h3>
+        <p>Created by Jordan O'Leary.</p>
+        <h3>Menu</h3>
+        <p>Main-menu shell and settings framework adapted from <em>Some of You May Die</em>.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <script type="module" src="/src/menu.ts"></script>
+</body>
 </html>
