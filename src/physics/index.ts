@@ -133,6 +133,25 @@ class Physics {
     this.impl.setVelocity(owner, 0, 0);
   }
 
+  /** Set an actor's velocity outright, in pixels/second — used to launch a body on a hit. */
+  setVelocity(owner: ActorOwner, vxPx: number, vyPx: number): void {
+    this.impl.setVelocity(owner, vxPx, vyPx);
+  }
+
+  /** An actor's current velocity, in pixels/second. */
+  getVelocity(owner: ActorOwner): { x: number; y: number } {
+    return this.impl.getVelocity(owner);
+  }
+
+  /**
+   * Multiply an actor's velocity by `factor` (0..1) — one step of the exponential decay a
+   * knocked-back guard skids to a halt under while the AI is holding off (roadmap follow-up).
+   */
+  scaleVelocity(owner: ActorOwner, factor: number): void {
+    const v = this.impl.getVelocity(owner);
+    this.impl.setVelocity(owner, v.x * factor, v.y * factor);
+  }
+
   teleport(owner: ActorOwner, x: number, y: number): void {
     this.impl.teleport(owner, x, y);
   }
