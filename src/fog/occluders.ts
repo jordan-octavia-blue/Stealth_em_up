@@ -34,8 +34,15 @@ export interface OccluderGridLike {
  * Everything outside the map counts as blocking, so the border walls do not emit
  * outward-facing edges nobody can ever stand behind. The four map-boundary segments are
  * appended regardless, so a sweep can never escape a map whose edge is not walled in.
+ *
+ * `inset` pushes each wall edge that many pixels *into* the wall, away from the open cell
+ * it borders. The visibility sweep then reaches that far past the wall's front face, so a
+ * strip of the wall stays lit instead of the whole wall being swallowed by shadow — the
+ * Teleglitch look. Walls are at least one full `cell_size` thick and the inset is small,
+ * so a ray can never cross a wall through it: it only ever reveals the wall's own near
+ * face. The four map-boundary segments are never inset (there is nothing behind them).
  */
-export function buildOccluders(grid: OccluderGridLike): Segment[] {
+export function buildOccluders(grid: OccluderGridLike, inset = 0): Segment[] {
   const { width, height, cells } = grid;
   const cs = grid.cell_size;
   const out: Segment[] = [];
@@ -47,10 +54,11 @@ export function buildOccluders(grid: OccluderGridLike): Segment[] {
   };
 
   // Horizontal runs: the top edge of every blocking cell whose northern neighbour is
-  // see-through, then the same for bottom edges.
+  // see-through, then the same for bottom edges. `-side * inset` slides the line off the
+  // wall's face and into its body (south for a top edge, north for a bottom edge).
   for (const side of [-1, 1] as const) {
     for (let y = 0; y < height; y++) {
-      const lineY = side === -1 ? y * cs : (y + 1) * cs;
+      const lineY = (side === -1 ? y * cs : (y + 1) * cs) - side * inset;
       let runStart = -1;
       for (let x = 0; x <= width; x++) {
         const isEdge = x < width && blocking(x, y) && !blocking(x, y + side);
@@ -63,10 +71,10 @@ export function buildOccluders(grid: OccluderGridLike): Segment[] {
     }
   }
 
-  // Vertical runs: west edges, then east edges.
+  // Vertical runs: west edges, then east edges, slid into the wall the same way.
   for (const side of [-1, 1] as const) {
     for (let x = 0; x < width; x++) {
-      const lineX = side === -1 ? x * cs : (x + 1) * cs;
+      const lineX = (side === -1 ? x * cs : (x + 1) * cs) - side * inset;
       let runStart = -1;
       for (let y = 0; y <= height; y++) {
         const isEdge = y < height && blocking(x, y) && !blocking(x + side, y);

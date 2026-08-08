@@ -92,6 +92,52 @@ Dead bodies are their own alarm source: `guard.kill()` pushes the corpse into
   `setLastSeen(null)` path — so a loud getaway pulls *already-alarmed* guards toward
   the van, but never alarms a guard who wasn't already alerted.
 
+### Grenades and data-driven weapons (Phase 8)
+
+Weapon and throwable stats live in `data/weapons.json` (loaded by `src/systems/weapons.ts`):
+`{ id, damage, loudness, ... }` for guns, plus `{ id, damage, loudness, fuseMs, radius,
+effects }` for the three throwables. Guns migrated to this table but still kill in one shot
+— `damage` is carried as data, not subtracted from any hitpoint pool (guards have **no hp**;
+Phase 6a's health model was skipped — see the memory note). Throw with keys **3 = frag,
+4 = smoke, 5 = flash**, aimed at the mouse. A grenade lerps from the hero to the target with
+a faked height (the sprite grows then shrinks — top-down, no physics body until it lands),
+then a short fuse runs, then its effect fires. All of this lives in `src/systems/grenades.ts`.
+
+- **Frag** reuses the bomb's machinery: `grid.damageCell(..., 'bomb')` over its radius (so it
+  breaches walls exactly like the bomb), `guard.kill()` on anyone in range (one-shot, no hp),
+  and the bomb's loud alarm — `alert_all_guards()` plus pointing the squad at the blast. A
+  frag is **not** a stealth tool; an explosion alarms calm guards, on purpose.
+- **Smoke** touches the *two separate vision systems* in this codebase. For guards and
+  cameras (which see via physics raycasts) it adds `VISION_BLOCKER` sensor circles through
+  `physics.addVisionBlocker` — the ray filter now lets a `VISION_BLOCKER` sensor stop sight
+  and gunfire. For the player's fog-of-war (built from the grid's `blocks_vision` flags, not
+  physics) it flags the covered cells `blocks_vision` and emits `vision:dirty` to rebuild the
+  occluders. Both are undone when the cloud expires.
+- **Flash** sets `blindUntil` (a gameClock timestamp) on every guard and camera within radius
+  that it has line of sight to. While it holds, `jo_sprite.doesSpriteSeeSprite` returns false
+  for that unit — so it sees nothing and its alarm state cannot change (awareness frozen).
+  This is deliberately **independent of `willCauseAlert()`**: a flash blinds a guard whatever
+  the hero is or isn't doing. While blinded, a guard also **stops where it stands** and shows a
+  spinning "dazed stars" marker above it (`updateGuardBlindFx` in `src/legacy/main.ts` freezes
+  its AI/movement for those frames without clearing `moving`, so it resumes its route when the
+  blind ends), and a blinded camera **stops swivelling**.
+
+### Grenade blast particles and "guards notice grenades"
+
+- Every grenade throws a burst of small tinted debris across its whole blast disc on
+  detonation (`grenadeBlastParticles` in `src/systems/particles.ts`, tinted per type). It reuses
+  the existing shard tick loop, so the particles bounce off walls and fade like wall shards.
+- Guards and cameras get alerted two ways, both reusing the normal detection path:
+  - **See:** while a grenade is in the air or lying on the floor, it puts a lightweight
+    `{x, y}` proxy in `window.alarmingObjects` (the same list a dead body goes in), so any
+    guard/camera with line of sight to it reacts through `seeAlarmingObject()`. The proxy tracks
+    the grenade's position and is removed when it is gone. (A smoke cloud blocks sight, so it
+    tends to hide its own canister once it deploys.)
+  - **Hear:** on detonation a *non-loud* grenade (smoke, flash) alerts every living guard within
+    `loudness * 80` px — no line of sight — and points the squad at the spot (`beHeard` in
+    `src/systems/grenades.ts`). Guards this same flash just blinded are skipped. Frag skips this
+    path because it is `loud`: it wakes the whole floor via `alert_all_guards()` instead.
+
 ### Key files
 
 - `src/legacy/sprite_hero.ts` — the suspicion flags and `willCauseAlert()`.
@@ -101,5 +147,8 @@ Dead bodies are their own alarm source: `guard.kill()` pushes the corpse into
   `knowsHerosFace`), `seeAlarmingObject`, `becomeAlarmed`.
 - `src/legacy/jo_security_camera.ts` — camera alarm logic and dead-body registration.
 - `src/systems/car.ts` — van enter/exit, driving, and engine noise.
-- `src/systems/input.ts` — key handlers that set the suspicion flags.
-
+- `src/systems/grenades.ts` — frag/smoke/flash: throw arc, fuse, and the three effects.
+- `src/systems/weapons.ts` + `data/weapons.json` — the data-driven weapon/throwable table.
+- `src/physics/world.ts` — `addVisionBlocker`/`removeVisionBlocker` (smoke) and the ray
+  filter that lets a `VISION_BLOCKER` sensor stop sight.
+- `src/systems/input.ts` — key handlers that set the suspicion flags and throw grenades.

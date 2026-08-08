@@ -222,6 +222,23 @@ class Physics {
     return this.impl.openersNear(cell);
   }
 
+  // --- smoke (roadmap §8.2, Phase 8) ----------------------------------------
+
+  /**
+   * Deploy a smoke cloud from a set of pixel-space circles `{x, y, r}`. The circles are
+   * `VISION_BLOCKER` sensors: they stop guard/camera sight and gunfire without pushing
+   * anyone. Returns a handle to pass to `removeVisionBlocker`.
+   */
+  addVisionBlocker(circles: ReadonlyArray<{ x: number; y: number; r: number }>): number {
+    if (!this.built) return -1;
+    return this.impl.addVisionBlocker(circles);
+  }
+
+  removeVisionBlocker(id: number): void {
+    if (id < 0) return;
+    this.impl.removeVisionBlocker(id);
+  }
+
   // --- queries --------------------------------------------------------------
 
   /**

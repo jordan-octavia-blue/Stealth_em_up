@@ -33,6 +33,13 @@ import { computeVisibility } from '../fog/visibility';
 export const FOG_RADIUS = 900;
 /** Security cameras keep the 120° cone the starburst gave them. */
 export const CAMERA_CONE = (2 * Math.PI) / 3;
+/**
+ * How many pixels the shadow reaches *into* each wall, so the wall's near face stays lit
+ * instead of being fully swallowed by the line-of-sight darkness (the Teleglitch look).
+ * A cell is 64 px, so this lights roughly the front third of a wall; keep it under half a
+ * cell (32) or two facing walls' lit strips would meet in the middle of a one-tile wall.
+ */
+export const WALL_LIGHT_INSET = 20;
 
 let occluders: Segment[] | null = null;
 let occluderVersion = -1;
@@ -100,7 +107,7 @@ export function resetFog(): void {
 /** The live occluder set, rebuilt lazily after any geometry change. */
 export function currentOccluders(): Segment[] {
   if (!occluders) {
-    occluders = buildOccluders(grid);
+    occluders = buildOccluders(grid, WALL_LIGHT_INSET);
     occluderVersion++;
   }
   return occluders;

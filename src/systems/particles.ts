@@ -150,6 +150,47 @@ export function bloodParticleSplatter(angle,target){
     }
 
 }
+//Scatter a burst of small tinted particles across a grenade's blast disc (Phase 8).
+//Reuses the shard tick machinery (bounce off walls, spin, fade out after a few ticks);
+//the particles start at random points *within* `radius` and fly outward from `center`,
+//so the effect reads as the whole blast area erupting, not a single point. `tint` colours
+//them per grenade type (fiery for frag, grey for smoke, white for flash). Self-guards when
+//the render globals are absent, so it is safe to call headless.
+export function grenadeBlastParticles(center,radius,tint){
+    if(typeof PIXI === 'undefined' || typeof particle_container === 'undefined' || !particle_container)return;
+    var amount = randomIntFromInterval(24,40);
+    for(var i = 0; i < amount; i++){
+        var p = new PIXI.Sprite(currentShard);
+        p.anchor.x = 0.5;
+        p.anchor.y = 0.5;
+        p.tint = tint;
+        //random point uniformly over the blast disc
+        var ang = randomFloatFromInterval(-Math.PI,Math.PI);
+        var d = Math.sqrt(Math.random())*radius;
+        p.position.x = center.x + Math.cos(ang)*d;
+        p.position.y = center.y + Math.sin(ang)*d;
+        var randScale = randomFloatFromInterval(0.3,0.9);
+        p.scale.x = randScale;
+        p.scale.y = randScale;
+        //fly outward: tickParticle moves by (position.x -= dx, position.y += dy)
+        var speed = randomFloatWithBias(0.5,shell_speed*1.5);
+        p.dx = -Math.cos(ang)*speed;
+        p.dy = Math.sin(ang)*speed;
+        p.dr = randomFloatFromInterval(-0.4,0.4);
+        p.tick = 0;
+        p.rotation = ang;
+
+        shards.push(p);
+        particle_container.addChild(p);
+
+        //cycle the shard image like the other shard emitters do
+        window.shardType++;
+        window.shardType %= shardImages.length;
+        window.currentShard = shardImages[shardType];
+
+        if(shards.length > shard_limit)return;
+    }
+}
 export function ejectShell(source){
 
     var shell = new PIXI.Sprite(img_shell);

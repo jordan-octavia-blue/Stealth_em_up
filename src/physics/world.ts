@@ -168,6 +168,9 @@ export class PhysicsWorld {
   private carContacts: CarContact[] = [];
   /** Box2D forbids destroying fixtures mid-step; these are flushed before the next one. */
   private pendingDestroy: Fixture[] = [];
+  /** Active smoke clouds (roadmap §8.2, Phase 8): one VISION_BLOCKER sensor body each. */
+  private smokeBodies = new Map<number, Body>();
+  private nextSmokeId = 1;
 
   private gridWidth = 0;
   private cellSize = 64;
@@ -212,6 +215,9 @@ export class PhysicsWorld {
     if (this.mapBody) this.world.destroyBody(this.mapBody);
     for (const record of this.actors.values()) this.world.destroyBody(record.body);
     for (const record of this.cars.values()) this.world.destroyBody(record.body);
+    for (const body of this.smokeBodies.values()) this.world.destroyBody(body);
+    this.smokeBodies.clear();
+    this.nextSmokeId = 1;
     this.mapBody = null;
     this.cellFixtures.clear();
     this.doorFixtures.clear();
@@ -451,6 +457,38 @@ export class PhysicsWorld {
     return this.cellFixtures.has(cell) || this.doorFixtures.has(cell);
   }
 
+  // --- smoke (roadmap §8.2, Phase 8) ----------------------------------------
+
+  /**
+   * Deploy a smoke cloud: one static body carrying a `VISION_BLOCKER` sensor circle for
+   * each `{x, y, r}` (pixels). They are sensors, so they never shove a body or stop the
+   * car — but the rayCast filter above now lets a `VISION_BLOCKER` sensor stop a sight
+   * or bullet ray, so guards and cameras cannot see (or shoot) through the cloud. Their
+   * collision mask is 0 so they generate no contacts at all. Returns a handle for
+   * `removeVisionBlocker`.
+   */
+  addVisionBlocker(circles: ReadonlyArray<{ x: number; y: number; r: number }>): number {
+    const body = this.world.createBody({ type: 'static', position: Vec2(0, 0) });
+    for (const c of circles) {
+      body.createFixture(Circle(Vec2(c.x / PPM, c.y / PPM), c.r / PPM), {
+        isSensor: true,
+        filterCategoryBits: CATEGORY.VISION_BLOCKER,
+        filterMaskBits: 0,
+      });
+    }
+    const id = this.nextSmokeId++;
+    this.smokeBodies.set(id, body);
+    return id;
+  }
+
+  /** Remove a smoke cloud created by `addVisionBlocker`. Safe to call outside a step. */
+  removeVisionBlocker(id: number): void {
+    const body = this.smokeBodies.get(id);
+    if (!body) return;
+    this.world.destroyBody(body);
+    this.smokeBodies.delete(id);
+  }
+
   /**
    * Open or close a door cell. Open = sensor (walk through) and no `VISION_BLOCKER`
    * bit (see through, shoot through). One call replaces the grid-flag flipping that
@@ -496,7 +534,10 @@ export class PhysicsWorld {
       Vec2(x0 / PPM, y0 / PPM),
       Vec2(x1 / PPM, y1 / PPM),
       (fixture, point, _normal, fraction) => {
-        if (fixture.isSensor()) return -1;
+        // Sensors are normally intangible to rays (door proximity triggers, open doors).
+        // A smoke cloud is the one exception: a VISION_BLOCKER sensor still stops sight
+        // and gunfire, which is the whole point of throwing it (roadmap §8.2, Phase 8).
+        if (fixture.isSensor() && (fixture.getFilterCategoryBits() & CATEGORY.VISION_BLOCKER) === 0) return -1;
         const category = fixture.getFilterCategoryBits();
         if ((category & mask) === 0) return -1;
         if (reject !== 0 && (category & reject) !== 0) return -1;

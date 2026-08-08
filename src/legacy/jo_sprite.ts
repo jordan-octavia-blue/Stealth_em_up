@@ -4,6 +4,7 @@ If you would like to copy or use my code, you may contact
 me at jdoleary@gmail.com
 /*******************************************************/
 import { physics } from '../physics';
+import { gameClock } from '../core/clock';
 function jo_sprite(pixiSprite, parent){
     //utility variables, these do not affect the actual sprite, but are used for camera and such, see prepare_for_draw()
     this.x = 0;
@@ -224,7 +225,13 @@ function jo_sprite(pixiSprite, parent){
     //fixtures that stop bullets, filtered the same way. The grid-DDA raycaster this
     //replaced walked 40 cell boundaries and silently returned "no wall" past that, so
     //a long diagonal sightline could report clear through a building.
+    //gameClock time (ms) until which a flashbang has blinded this sprite (Phase 8). While
+    //it holds, doesSpriteSeeSprite returns false for everything, which both stops a guard
+    //spotting the hero (or a body) and freezes its alarm state — it simply sees nothing.
+    this.blindUntil = 0;
     this.doesSpriteSeeSprite = function(otherSprite){
+        //A flashbanged guard/camera sees nothing until the blind wears off (Phase 8).
+        if(this.blindUntil && gameClock.now() < this.blindUntil)return false;
         //Check if this sprite sees otherSprite
         var visionConeAngleForotherSprite = this.angleBetweenSprites_relativeToThis(otherSprite);
         if(visionConeAngleForotherSprite <= 1.22 && visionConeAngleForotherSprite >= -1.22){
