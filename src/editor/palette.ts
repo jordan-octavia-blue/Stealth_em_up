@@ -97,7 +97,7 @@ export const PALETTE: ToolGroup[] = [
     tools: [
       { id: 'loot', label: 'Money', swatch: '#f1c40f', action: { kind: 'point', objectKey: 'loot' }, hint: 'The loot to steal.' },
       { id: 'computer', label: 'Computer', swatch: '#16a085', action: { kind: 'point', objectKey: 'computer' }, hint: 'Camera-hacking terminal.' },
-      { id: 'camera', label: 'Camera', swatch: '#e67e22', action: { kind: 'camera' }, hint: 'Click to add a camera; click one to edit its sweep.' },
+      { id: 'camera', label: 'Camera', swatch: '#e67e22', action: { kind: 'camera' }, hint: 'Click to add a camera — snaps to cell corners; click one to edit its sweep.' },
     ],
   },
   {
@@ -109,7 +109,7 @@ export const PALETTE: ToolGroup[] = [
   {
     name: 'Edit',
     tools: [
-      { id: 'erase', label: 'Erase', swatch: '#555', action: { kind: 'erase' }, hint: 'Click an object to delete it, or a tile to clear it to floor.' },
+      { id: 'erase', label: 'Erase', swatch: '#555', action: { kind: 'erase' }, hint: 'Click an object to delete it, or a tile (door, desk, wall…) to clear it to floor.' },
     ],
   },
 ];

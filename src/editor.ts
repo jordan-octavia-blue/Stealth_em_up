@@ -16,6 +16,7 @@ import {
   CELL,
   type Edge,
   EditError,
+  clearTile,
   contractMap,
   createEmptyMap,
   deserialize,
@@ -40,6 +41,7 @@ import {
   moveSelection,
   placePoint,
   snapToCell,
+  snapToCorner,
   updateCamera,
   updateGuard,
 } from './editor/tools';
@@ -495,7 +497,7 @@ class Editor {
         deleteSelection(this.map, hit);
         this.selection = null;
       } else {
-        applyTileTool(this.map, { kind: 'tile', code: 2 }, c.x, c.y);
+        clearTile(this.map, c.x, c.y);
       }
       this.commit();
       return;
@@ -530,7 +532,9 @@ class Editor {
       }
       case 'camera': {
         this.pushUndo();
-        const i = addCamera(this.map, sx, sy);
+        // Cameras mount on cell corners, not centres.
+        const [cornerX, cornerY] = snapToCorner(c.wx, c.wy);
+        const i = addCamera(this.map, cornerX, cornerY);
         this.selection = { type: 'camera', index: i };
         this.dragging = this.selection;
         this.dragMoved = true;
@@ -579,7 +583,13 @@ class Editor {
         this.pushUndo();
         this.dragMoved = true;
       }
-      const [sx, sy] = this.dragging.type === 'patrolPoint' ? [c.wx, c.wy] : snapToCell(c.wx, c.wy);
+      // Patrol points move freely; cameras snap to cell corners; everything else to cell centres.
+      const [sx, sy] =
+        this.dragging.type === 'patrolPoint'
+          ? [c.wx, c.wy]
+          : this.dragging.type === 'camera'
+            ? snapToCorner(c.wx, c.wy)
+            : snapToCell(c.wx, c.wy);
       moveSelection(this.map, this.dragging, sx, sy);
       this.draw();
       return;

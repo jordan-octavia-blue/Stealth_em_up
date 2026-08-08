@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MapData } from '../../src/map/loader';
-import { TILE, cellCenterPx, createEmptyMap, flatIndex, setTile } from '../../src/editor/mapModel';
+import { CELL, TILE, cellCenterPx, createEmptyMap, flatIndex, setTile } from '../../src/editor/mapModel';
 import {
   addCamera,
   addGuard,
@@ -10,6 +10,7 @@ import {
   hitTestObject,
   pickDoorOrientation,
   snapToCell,
+  snapToCorner,
   updateGuard,
 } from '../../src/editor/tools';
 
@@ -116,5 +117,16 @@ describe('deleteSelection', () => {
 describe('snapToCell', () => {
   it('snaps a pixel to the centre of its cell', () => {
     expect(snapToCell(100, 200)).toEqual([cellCenterPx(1), cellCenterPx(3)]);
+  });
+});
+
+describe('snapToCorner', () => {
+  it('snaps a pixel to the nearest cell corner (grid intersection)', () => {
+    // 100 → 128 (2 cells), 200 → 192 (3 cells); cameras mount on corners
+    expect(snapToCorner(100, 200)).toEqual([2 * CELL, 3 * CELL]);
+  });
+
+  it('rounds to the closer corner on each axis', () => {
+    expect(snapToCorner(20, 40)).toEqual([0, CELL]); // 20 → 0, 40 → 64
   });
 });

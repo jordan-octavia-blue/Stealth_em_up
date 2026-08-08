@@ -222,3 +222,12 @@ export function createRoute(map: MapData): number {
 export function snapToCell(px: number, py: number): [number, number] {
   return [Math.floor(px / CELL) * CELL + CELL / 2, Math.floor(py / CELL) * CELL + CELL / 2];
 }
+
+/**
+ * Snap a world pixel to the nearest cell corner (a point where the grid lines cross). Cameras
+ * use this instead of {@link snapToCell} so they mount on the corners of cells rather than in
+ * the middle of one.
+ */
+export function snapToCorner(px: number, py: number): [number, number] {
+  return [Math.round(px / CELL) * CELL, Math.round(py / CELL) * CELL];
+}

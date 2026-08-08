@@ -7,6 +7,7 @@ import {
   TILE,
   cellCenterPx,
   cellOf,
+  clearTile,
   contractMap,
   createEmptyMap,
   deserialize,
@@ -64,12 +65,49 @@ describe('setTile', () => {
     expect(m.data[flatIndex(8, 0, 3)]).toBe(TILE.wall);
   });
 
-  it('clears a door type when the cell is painted to a non-door', () => {
+  it('painting floor only overwrites walls — it leaves doors and desks intact', () => {
+    const m = createEmptyMap(8, 8);
+    // a door: dragging floor over it must NOT delete the door
+    setDoor(m, 3, 3, 'vertical', 'locked');
+    setTile(m, 3, 3, TILE.floor);
+    expect(m.data[flatIndex(8, 3, 3)]).toBe(TILE.doorVertical);
+    expect(m.doorTypes[flatIndex(8, 3, 3)]).toEqual({ type: 'locked' });
+    // a desk: likewise preserved
+    setTile(m, 4, 4, TILE.desk);
+    setTile(m, 4, 4, TILE.floor);
+    expect(m.data[flatIndex(8, 4, 4)]).toBe(TILE.desk);
+    // a wall: floor DOES clear it
+    setTile(m, 5, 5, TILE.wall);
+    setTile(m, 5, 5, TILE.floor);
+    expect(m.data[flatIndex(8, 5, 5)]).toBe(TILE.floor);
+  });
+
+  it('painting a non-floor tile over a door still clears the door metadata', () => {
     const m = createEmptyMap(8, 8);
     setDoor(m, 3, 3, 'vertical', 'locked');
     expect(m.doorTypes[flatIndex(8, 3, 3)]).toBeDefined();
-    setTile(m, 3, 3, TILE.floor);
+    setTile(m, 3, 3, TILE.wall);
+    expect(m.data[flatIndex(8, 3, 3)]).toBe(TILE.wall);
     expect(m.doorTypes[flatIndex(8, 3, 3)]).toBeUndefined();
+  });
+});
+
+describe('clearTile (the Erase tool)', () => {
+  it('clears a door (tile + type) back to floor', () => {
+    const m = createEmptyMap(8, 8);
+    setDoor(m, 3, 3, 'vertical', 'reinforced');
+    clearTile(m, 3, 3);
+    expect(m.data[flatIndex(8, 3, 3)]).toBe(TILE.floor);
+    expect(m.doorTypes[flatIndex(8, 3, 3)]).toBeUndefined();
+  });
+
+  it('clears a desk back to floor but leaves the indestructible border', () => {
+    const m = createEmptyMap(8, 8);
+    setTile(m, 4, 4, TILE.desk);
+    clearTile(m, 4, 4);
+    expect(m.data[flatIndex(8, 4, 4)]).toBe(TILE.floor);
+    clearTile(m, 0, 3);
+    expect(m.data[flatIndex(8, 0, 3)]).toBe(TILE.wall);
   });
 });
 

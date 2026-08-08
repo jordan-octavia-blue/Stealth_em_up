@@ -119,18 +119,43 @@ export function createEmptyMap(width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT): 
 // ---------------------------------------------------------------------------
 
 /**
- * Paint a single cell. Cells on the outer ring are left as wall (the game forces the border
- * indestructible), so a paint there is ignored. Painting anything other than a door over a
- * door cell also clears that cell's door metadata.
+ * Paint a single cell with a palette tile. Cells on the outer ring are left as wall (the game
+ * forces the border indestructible), so a paint there is ignored.
+ *
+ * The Floor tile is deliberately special: it only paints over wall cells. Dragging floor
+ * across a door, desk, glass or existing floor leaves that cell untouched, so you can fill in
+ * a room's floor without wiping out the doors and furniture inside it. To clear any cell (a
+ * door included) back to plain floor, use {@link clearTile} — that is what the Erase tool does.
+ *
+ * Painting any *non-floor* tile over a door still clears that cell's door metadata: you are
+ * deliberately replacing the door with a wall/desk/etc.
  */
 export function setTile(map: MapData, x: number, y: number, code: number): void {
   if (x < 0 || y < 0 || x >= map.width || y >= map.height) return;
   if (isBorder(x, y, map.width, map.height)) return; // border stays indestructible wall
   const idx = flatIndex(map.width, x, y);
+  // Floor is a "clear the wall" brush: it only overwrites walls, so it never deletes a door,
+  // desk, glass tile or restricted floor it is dragged across (use clearTile / Erase for that).
+  if (code === TILE.floor && map.data[idx] !== TILE.wall) return;
   map.data[idx] = code;
   const isDoor = code === TILE.doorVertical || code === TILE.doorHorizontal;
   if (!isDoor && map.doorTypes[idx]) delete map.doorTypes[idx];
   if (code !== TILE.wall && code !== TILE.desk && map.hpOverrides[idx]) delete map.hpOverrides[idx];
+}
+
+/**
+ * Erase a cell back to plain floor, dropping any door or hp metadata — the editor's Erase
+ * action. Unlike painting the Floor tile (which only overwrites walls), this clears whatever
+ * is in the cell: a door, desk, glass or restricted floor. The indestructible border is left
+ * as wall.
+ */
+export function clearTile(map: MapData, x: number, y: number): void {
+  if (x < 0 || y < 0 || x >= map.width || y >= map.height) return;
+  if (isBorder(x, y, map.width, map.height)) return; // border stays indestructible wall
+  const idx = flatIndex(map.width, x, y);
+  map.data[idx] = TILE.floor;
+  delete map.doorTypes[idx];
+  delete map.hpOverrides[idx];
 }
 
 /**
