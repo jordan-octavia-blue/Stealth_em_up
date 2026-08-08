@@ -19,7 +19,7 @@
 import { gameClock } from '../core/clock';
 import { DEFAULT_CAR_TUNING, physics, PPM } from '../physics';
 import { bloodParticleSplatter } from './particles';
-import { isHost as mpIsHost } from './mp';
+import { isHost as mpIsHost, isClient as mpIsClient, mpAction } from './mp';
 
 // --- tuning -----------------------------------------------------------------
 
@@ -112,6 +112,13 @@ let van: any = null;
  */
 let driver: any = null;
 let aboard: any[] = [];
+/**
+ * HOST, remote driver: the streamed motion of the van. The mirrored body is
+ * teleported into place each update, so its own velocity reads ~0 — run-over
+ * lethality, dodge triggering and engine noise must use the driver's real
+ * numbers instead.
+ */
+let netMotion: { vx: number; vy: number; speed: number } | null = null;
 let lastNoiseAt = -Infinity;
 /** Bodywork left before the van is wrecked. Only counts down while it is being shot. */
 let carHealth = CAR_MAX_HEALTH;
@@ -273,6 +280,7 @@ export function resetCarSystem(): void {
   van = null;
   driver = null;
   aboard = [];
+  netMotion = null;
   carHealth = CAR_MAX_HEALTH;
   lastNoiseAt = -Infinity;
   knockbacks.length = 0;
@@ -296,6 +304,33 @@ export function isVanOccupied(): boolean {
 /** The hero in the driver's seat, or null when the van is parked/empty. */
 export function vanDriver(): any {
   return driver;
+}
+
+/** Netplay: the host records the remote driver's streamed motion here. */
+export function setNetVanMotion(vx: number, vy: number, speed: number): void {
+  netMotion = { vx, vy, speed };
+}
+
+/** Netplay: force the driver's seat (snapshot reconciliation on clients). */
+export function setNetDriver(h: any): void {
+  driver = h;
+}
+
+/** The motion numbers gameplay should trust for this van right now. */
+function effectiveMotion(st: { vx: number; vy: number; speed: number }): {
+  vx: number;
+  vy: number;
+  speed: number;
+} {
+  if (netMotion && driver && driver !== hero && mpIsHost()) return netMotion;
+  return st;
+}
+
+/** Netplay: a remote driver reported ramming this wall cell at this speed. */
+export function applyNetBreach(cell: number, speed: number): void {
+  if (cell < 0 || speed < BREACH_SPEED_PX) return;
+  const amount = Math.min(speed * BREACH_DAMAGE_PER_SPEED, BREACH_DAMAGE_MAX);
+  grid.damageCell(cell, amount, 'car');
 }
 
 // --- enter / exit -----------------------------------------------------------
@@ -456,10 +491,12 @@ export function updateCarPreStep(): void {
     rider.y = st.y;
   }
 
-  // Engine noise and guard dodges are world simulation — host only.
+  // Engine noise and guard dodges are world simulation — host only. With a remote
+  // driver, the mirrored body's velocity is meaningless; use the streamed motion.
   if (mpIsHost()) {
+    const motion = effectiveMotion(st);
     // Engine noise: while moving fast, re-broadcast the van's position so guards converge on it.
-    if (driver && st.speed >= NOISE_MIN_SPEED_PX) {
+    if (driver && motion.speed >= NOISE_MIN_SPEED_PX) {
       const now = gameClock.now();
       if (now - lastNoiseAt >= NOISE_INTERVAL_MS) {
         lastNoiseAt = now;
@@ -467,7 +504,7 @@ export function updateCarPreStep(): void {
       }
     }
 
-    triggerDodges(st);
+    triggerDodges({ x: st.x, y: st.y, vx: motion.vx, vy: motion.vy, speed: motion.speed });
   }
 }
 
@@ -529,11 +566,21 @@ export function updateCarPostStep(dtMs: number): void {
     }
   }
 
-  // Run-overs and wall breaches are world state — host adjudicates. Contacts are
-  // still drained on clients so the queue can't grow unbounded.
-  const contactsMattered = mpIsHost();
-  if (contactsMattered) resolveCarContacts(st);
-  else physics.drainCarContacts();
+  // Run-overs and wall breaches are world state — host adjudicates. The driving
+  // CLIENT is the only machine whose van body really collides with walls, so it
+  // reports its own ramming impacts up to the host as requests.
+  if (mpIsHost()) {
+    resolveCarContacts(st);
+  } else {
+    const contacts = physics.drainCarContacts();
+    if (driver === hero && mpIsClient()) {
+      for (const c of contacts) {
+        if (c.kind === 'cell' && c.cell >= 0 && c.speed >= BREACH_SPEED_PX) {
+          mpAction('van_breach', { cell: c.cell, speed: c.speed }, () => {});
+        }
+      }
+    }
+  }
   advanceKnockbacks(dtMs);
 }
 
@@ -542,11 +589,12 @@ function resolveCarContacts(st: { vx: number; vy: number; speed: number } | null
   // Lethality is gated on the van's own driving speed, not the closing speed: a stationary
   // van can never run anyone over, however fast they walk into it — the collision just
   // shoves them (Box2D does that on its own). Only a van driving above the threshold kills.
-  const driving = st ? st.speed : 0;
+  const motion = st ? effectiveMotion(st) : null;
+  const driving = motion ? motion.speed : 0;
   for (const c of contacts) {
     if (c.kind === 'actor' && c.owner) {
       const unit = c.owner as any;
-      if (unit.alive && driving >= RUN_OVER_SPEED_PX) runOver(unit, st);
+      if (unit.alive && driving >= RUN_OVER_SPEED_PX) runOver(unit, motion);
     } else if (c.kind === 'cell' && c.cell >= 0 && c.speed >= BREACH_SPEED_PX) {
       // damageCell filters by material: drywall and brick take car damage, concrete and
       // steel (and the map border) shrug it off. The amount is capped low (see

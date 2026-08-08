@@ -44,7 +44,15 @@ import {
   setRequestSender,
   setSession,
 } from './mp';
-import { isHeroInCar, enterCar, exitCar, vanDriver } from './car';
+import {
+  isHeroInCar,
+  enterCar,
+  exitCar,
+  vanDriver,
+  setNetVanMotion,
+  setNetDriver,
+  applyNetBreach,
+} from './car';
 
 // --- pacing ------------------------------------------------------------------
 
@@ -578,13 +586,17 @@ function handleGameMessage(m: GameMessage): void {
         applyReplicaFlags(h, d.msg.flags, d.msg.gunId);
       }
     } else if (d.kind === 'vanState') {
-      //a remote driver owns the van: mirror its body kinematically
+      //a remote driver owns the van: mirror its body kinematically and remember
+      //its real motion (the mirrored body's own velocity reads ~0)
       const driver = vanDriver();
       if (driver && driver.playerId === m.fromPlayerId) {
         const van = window.getawaycar;
         if (van && physics.hasCar(van)) {
           physics.teleportCar(van, d.msg.x, d.msg.y, d.msg.angle);
-          remoteVanSpeed = Math.hypot(d.msg.vx * 60, d.msg.vy * 60);
+          const vxPerSec = d.msg.vx * 60;
+          const vyPerSec = d.msg.vy * 60;
+          remoteVanSpeed = Math.hypot(vxPerSec, vyPerSec);
+          setNetVanMotion(vxPerSec, vyPerSec, remoteVanSpeed);
         }
       }
     }
@@ -702,6 +714,14 @@ function handleRequest(pid: number, msg: JsonMsg): void {
       window.doGunShotEffects(h, h.gun.silenced);
       window.ejectShell && window.ejectShell(h);
       if (!h.gun.silenced) window.unsilenced_gun(h);
+      break;
+    }
+    case 'van_breach': {
+      //only the current driver may report ramming damage, and only at plausible speeds
+      const driver = vanDriver();
+      if (!driver || driver.playerId !== pid) return;
+      const speed = Math.min(msg.speed as number, 2000);
+      applyNetBreach(msg.cell as number, speed);
       break;
     }
     case 'revive': {
@@ -987,9 +1007,14 @@ function applySnapshot(snap: Snapshot): void {
 }
 
 function applyVanSeatsFromSnapshot(van: SnapshotVan): void {
-  //teammate visibility while aboard is driven by their hero InCar flag; here we
-  //only need to remember who drives (for the HUD later)
   window.mpVanDriverId = van.driverId;
+  //driver-seat reconciliation: if the host says someone ELSE holds the wheel
+  //(two players climbed in near-simultaneously), yield it. A transient 255
+  //(host hasn't processed our boarding yet) never demotes us.
+  const myPid = window.mpLocalPlayerId ?? 0;
+  if (van.driverId !== 255 && van.driverId !== myPid && vanDriver() === window.hero) {
+    setNetDriver(heroByPlayerId(van.driverId));
+  }
 }
 
 function clientAdvanceInterpolation(): void {
