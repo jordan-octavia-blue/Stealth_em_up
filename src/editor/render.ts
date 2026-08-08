@@ -9,11 +9,15 @@
 
 import type { MapData } from '../map/loader';
 import { findWallType } from '../render/autotile';
+import { TILE, editorTileFile, tileType } from '../map/tiles';
 import { autotileAdapter } from './autotileAdapter';
-import { CELL, TILE, flatIndex } from './mapModel';
+import { CELL, flatIndex } from './mapModel';
 import type { EditorAssets } from './assets';
 import { DOOR_TYPE_COLORS } from './palette';
 import type { Selection } from './tools';
+
+/** The floor PNG basename — drawn as the base under doors and translucent (glass) tiles. */
+const FLOOR_FILE = editorTileFile(TILE.floor) ?? 'tile_white';
 
 /** Pan + zoom: a world pixel (wx, wy) draws at (wx*scale + offsetX, wy*scale + offsetY). */
 export interface View {
@@ -82,6 +86,13 @@ export function renderMap(
   drawBorderOutline(ctx, map);
 }
 
+/**
+ * Draw one map cell. Every tile is drawn from its entry in the shared catalog
+ * (src/map/tiles.ts), so a new tile added there renders here with no edit: an `image` tile
+ * draws its PNG, a `wall` tile gets the autotiled overlay, a `door` gets the door sprite + type
+ * badge, and anything else (glass today, any art-less future tile) draws as a translucent
+ * colour over the floor. A code missing from the catalog falls back to a plain floor.
+ */
 function drawCell(
   ctx: CanvasRenderingContext2D,
   assets: EditorAssets,
@@ -93,18 +104,18 @@ function drawCell(
   const px = x * CELL;
   const py = y * CELL;
   const code = map.data[flatIndex(map.width, x, y)];
-  switch (code) {
-    case TILE.floor:
-      ctx.drawImage(assets.tileFloor, px, py, CELL, CELL);
+  const t = tileType(code);
+  if (!t) {
+    ctx.drawImage(assets.tiles[FLOOR_FILE], px, py, CELL, CELL);
+    return;
+  }
+  const draw = t.editorDraw;
+  switch (draw.kind) {
+    case 'image':
+      ctx.drawImage(assets.tiles[draw.file], px, py, CELL, CELL);
       break;
-    case TILE.desk:
-      ctx.drawImage(assets.tileDesk, px, py, CELL, CELL);
-      break;
-    case TILE.restricted:
-      ctx.drawImage(assets.tileRestricted, px, py, CELL, CELL);
-      break;
-    case TILE.wall: {
-      ctx.drawImage(assets.tileWall, px, py, CELL, CELL);
+    case 'wall': {
+      ctx.drawImage(assets.tiles[draw.base], px, py, CELL, CELL);
       const wt = findWallType(grid, x, y);
       ctx.save();
       ctx.translate(px + CELL / 2, py + CELL / 2);
@@ -113,12 +124,11 @@ function drawCell(
       ctx.restore();
       break;
     }
-    case TILE.doorVertical:
-    case TILE.doorHorizontal: {
-      ctx.drawImage(assets.tileFloor, px, py, CELL, CELL);
+    case 'door': {
+      ctx.drawImage(assets.tiles[FLOOR_FILE], px, py, CELL, CELL);
       ctx.save();
       ctx.translate(px + CELL / 2, py + CELL / 2);
-      if (code === TILE.doorHorizontal) ctx.rotate(Math.PI / 2);
+      if (t.doorHorizontal) ctx.rotate(Math.PI / 2);
       ctx.drawImage(assets.doorClosed, -CELL / 2, -CELL / 2, CELL, CELL);
       ctx.restore();
       const spec = map.doorTypes[flatIndex(map.width, x, y)];
@@ -126,8 +136,18 @@ function drawCell(
       ctx.fillRect(px + 3, py + 3, 13, 13);
       break;
     }
-    default:
-      ctx.drawImage(assets.tileFloor, px, py, CELL, CELL);
+    case 'swatch': {
+      ctx.drawImage(assets.tiles[FLOOR_FILE], px, py, CELL, CELL);
+      ctx.globalAlpha = draw.alpha;
+      ctx.fillStyle = draw.color;
+      ctx.fillRect(px, py, CELL, CELL);
+      ctx.globalAlpha = 1;
+      // A thin outline so a translucent tile (e.g. glass) reads as a distinct filled cell.
+      ctx.strokeStyle = draw.color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(px + 1, py + 1, CELL - 2, CELL - 2);
+      break;
+    }
   }
 }
 

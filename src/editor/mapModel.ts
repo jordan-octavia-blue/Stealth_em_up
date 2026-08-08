@@ -16,19 +16,15 @@
 
 import { CURRENT_MAP_VERSION, type MapData, loadMap } from '../map/loader';
 import { DOOR_TYPE_DEFAULTS, type DoorSpec, type DoorType } from '../map/doors';
+import { TILE } from '../map/tiles';
 
 /** Pixels per cell — the game's fixed grid size. */
 export const CELL = 64;
 
-/** Tile codes (mirrors the `switch` in src/legacy/jo_grid.ts). */
-export const TILE = {
-  wall: 1,
-  floor: 2,
-  desk: 3,
-  restricted: 4,
-  doorVertical: 5,
-  doorHorizontal: 6,
-} as const;
+// Tile codes come from the shared tile catalog (src/map/tiles.ts), the single source of truth
+// the game grid and the whole editor derive from. Re-exported so the editor's existing
+// `import { TILE } from './mapModel'` call sites keep working.
+export { TILE };
 
 /** Smallest allowed map: a 1-cell indestructible border on each side needs ≥1 interior cell. */
 export const MIN_DIM = 3;

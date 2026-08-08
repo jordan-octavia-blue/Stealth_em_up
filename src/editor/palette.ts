@@ -8,7 +8,7 @@
  */
 
 import type { DoorType } from '../map/doors';
-import { TILE } from './mapModel';
+import { paintableTiles } from '../map/tiles';
 
 /** What clicking the map does with a given tool selected. */
 export type ToolAction =
@@ -45,21 +45,34 @@ export const DOOR_TYPE_COLORS: Record<DoorType, string> = {
   vault: '#5b8dd9',
 };
 
+/**
+ * The tile-paint groups (Walls, Floors, …), generated from the shared tile catalog so a new
+ * tile added to src/map/tiles.ts appears as a paint button automatically. Groups come out in
+ * the order their tiles first appear in the catalog; tiles keep the catalog's order within a
+ * group. Doors are excluded here (no `paletteGroup`) — they have their dedicated tools below.
+ */
+function tilePaletteGroups(): ToolGroup[] {
+  const groups: ToolGroup[] = [];
+  for (const tile of paintableTiles()) {
+    const groupName = tile.paletteGroup!;
+    let group = groups.find((g) => g.name === groupName);
+    if (!group) {
+      group = { name: groupName, tools: [] };
+      groups.push(group);
+    }
+    group.tools.push({
+      id: tile.id,
+      label: tile.label,
+      swatch: tile.swatch,
+      action: { kind: 'tile', code: tile.code },
+      hint: tile.hint,
+    });
+  }
+  return groups;
+}
+
 export const PALETTE: ToolGroup[] = [
-  {
-    name: 'Walls',
-    tools: [
-      { id: 'wall', label: 'Wall', swatch: '#1a1a1a', action: { kind: 'tile', code: TILE.wall }, hint: 'Drag to paint walls. Hold Shift for a straight line.' },
-      { id: 'desk', label: 'Desk', swatch: '#8a5a2b', action: { kind: 'tile', code: TILE.desk }, hint: 'Desk / low cover — solid but you can see over it.' },
-    ],
-  },
-  {
-    name: 'Floors',
-    tools: [
-      { id: 'floor', label: 'Floor', swatch: '#e8e8e8', action: { kind: 'tile', code: TILE.floor }, hint: 'Walkable public floor.' },
-      { id: 'restricted', label: 'Restricted', swatch: '#c0392b', action: { kind: 'tile', code: TILE.restricted }, hint: 'Staff-only floor — the hero is suspicious if seen here.' },
-    ],
-  },
+  ...tilePaletteGroups(),
   {
     name: 'Doors',
     tools: [

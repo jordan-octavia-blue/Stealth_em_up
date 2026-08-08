@@ -26,6 +26,14 @@ describe('cellFlagsForCode', () => {
     expect(cellFlagsForCode(2)).toEqual({ solid: false, door: false, blocks_vision: false });
     expect(cellFlagsForCode(4)).toEqual({ solid: false, door: false, blocks_vision: false });
   });
+
+  it('treats glass as solid but see-through (not a wall neighbour)', () => {
+    expect(cellFlagsForCode(7)).toEqual({ solid: true, door: false, blocks_vision: false });
+  });
+
+  it('treats an unknown/legacy code as empty floor', () => {
+    expect(cellFlagsForCode(999)).toEqual({ solid: false, door: false, blocks_vision: false });
+  });
 });
 
 describe('autotileAdapter + findWallType (parity with the game)', () => {
