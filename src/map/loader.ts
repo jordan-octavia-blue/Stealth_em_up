@@ -16,6 +16,8 @@
  * a validated one.
  */
 
+import { type DoorSpec, normalizeDoorSpec } from './doors';
+
 /** The current on-disk map format version this loader produces. */
 export const CURRENT_MAP_VERSION = 2;
 
@@ -46,6 +48,11 @@ export interface MapData {
   patrolRoutes: PatrolRoute[];
   /** Optional per-cell starting hp, keyed by flat cell index — overrides material defaults. */
   hpOverrides: Record<number, number>;
+  /**
+   * Optional per-door metadata (type, multi-cell group, hp/lockpick overrides), keyed by the
+   * door cell's flat index. A door cell (tile code 5/6) with no entry defaults to `locked`.
+   */
+  doorTypes: Record<number, DoorSpec>;
 }
 
 /** The default tileset a v1 map (which predates `tilesetRef`) is assumed to use. */
@@ -98,6 +105,7 @@ export function loadMap(raw: unknown): MapData {
     tilesetRef: typeof raw.tilesetRef === 'string' ? raw.tilesetRef : DEFAULT_TILESET_REF,
     patrolRoutes: normalizePatrolRoutes(raw.patrolRoutes),
     hpOverrides: normalizeHpOverrides(raw.hpOverrides),
+    doorTypes: normalizeDoorTypes(raw.doorTypes),
   };
 }
 
@@ -120,6 +128,18 @@ function normalizeHpOverrides(value: unknown): Record<number, number> {
   for (const [key, hp] of Object.entries(value)) {
     const index = Number(key);
     if (Number.isInteger(index) && typeof hp === 'number') out[index] = hp;
+  }
+  return out;
+}
+
+function normalizeDoorTypes(value: unknown): Record<number, DoorSpec> {
+  if (!isRecord(value)) return {};
+  const out: Record<number, DoorSpec> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    const index = Number(key);
+    if (!Number.isInteger(index)) continue;
+    const spec = normalizeDoorSpec(raw);
+    if (spec) out[index] = spec;
   }
   return out;
 }
