@@ -19,6 +19,7 @@
 import { gameClock } from '../core/clock';
 import { DEFAULT_CAR_TUNING, physics, PPM } from '../physics';
 import { bloodParticleSplatter } from './particles';
+import { isHost as mpIsHost } from './mp';
 
 // --- tuning -----------------------------------------------------------------
 
@@ -455,16 +456,19 @@ export function updateCarPreStep(): void {
     rider.y = st.y;
   }
 
-  // Engine noise: while moving fast, re-broadcast the van's position so guards converge on it.
-  if (driver && st.speed >= NOISE_MIN_SPEED_PX) {
-    const now = gameClock.now();
-    if (now - lastNoiseAt >= NOISE_INTERVAL_MS) {
-      lastNoiseAt = now;
-      driver.setLastSeen(null);
+  // Engine noise and guard dodges are world simulation — host only.
+  if (mpIsHost()) {
+    // Engine noise: while moving fast, re-broadcast the van's position so guards converge on it.
+    if (driver && st.speed >= NOISE_MIN_SPEED_PX) {
+      const now = gameClock.now();
+      if (now - lastNoiseAt >= NOISE_INTERVAL_MS) {
+        lastNoiseAt = now;
+        driver.setLastSeen(null);
+      }
     }
-  }
 
-  triggerDodges(st);
+    triggerDodges(st);
+  }
 }
 
 /** Send guards standing in the van's path into a short perpendicular dodge. */
@@ -525,7 +529,11 @@ export function updateCarPostStep(dtMs: number): void {
     }
   }
 
-  resolveCarContacts(st);
+  // Run-overs and wall breaches are world state — host adjudicates. Contacts are
+  // still drained on clients so the queue can't grow unbounded.
+  const contactsMattered = mpIsHost();
+  if (contactsMattered) resolveCarContacts(st);
+  else physics.drainCarContacts();
   advanceKnockbacks(dtMs);
 }
 
