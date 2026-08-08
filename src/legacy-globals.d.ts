@@ -223,6 +223,11 @@ declare global {
   var mpTryStartMission: any;
   var mpBroadcastEvent: any;
   var mpOnShotFired: any;
+  var hasLost: any;
+  var downHero: any;
+  var reviveHero: any;
+  var applyMissionLose: any;
+  var applyMissionWin: any;
   var next_gun_drop_id: any;
   var spawnGunDrop: any;
   var plantBombAt: any;
@@ -267,6 +272,7 @@ declare global {
   var security_cameras: any;
   var setBomb: any;
   var setHeroImage: any;
+  var setHeroImageFor: any;
   var set_latestAlert: any;
   var setup_map: any;
   var shardType: any;

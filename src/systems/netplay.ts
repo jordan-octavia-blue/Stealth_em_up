@@ -249,6 +249,11 @@ function applyRemoteHeroVisuals(h: any, flags: number, gunId: number): void {
   const visible = !h.inCar;
   if (h.sprite.visible !== visible) h.sprite.visible = visible;
   if (h.nameTag) h.nameTag.visible = visible;
+  //downed/revived normally arrive as reliable events; the snapshot bit is the
+  //self-heal if one was somehow missed
+  const downed = !!(flags & HeroFlag.Downed);
+  if (downed && !h.downed) h.becomeDowned(h.x, h.y);
+  else if (!downed && h.downed) h.revive();
 }
 
 // --- guard replicas (client) -------------------------------------------------
@@ -699,6 +704,13 @@ function handleRequest(pid: number, msg: JsonMsg): void {
       if (!h.gun.silenced) window.unsilenced_gun(h);
       break;
     }
+    case 'revive': {
+      const target = heroByPlayerId(msg.pid as number);
+      if (!target || !target.downed) return;
+      if (!replicaNear(pid, target.x, target.y, h.radius * window.dragDistance)) return;
+      window.reviveHero(target);
+      break;
+    }
     case 'pickup_gun': {
       const id = msg.id as number | null;
       const drops = window.gun_drops as any[];
@@ -810,6 +822,34 @@ function handleEvent(msg: JsonMsg): void {
       break;
     case 'cell_destroyed':
       applyDestroyedCells([msg.cell as number]);
+      break;
+    case 'hero_downed': {
+      const h = heroByPlayerId(msg.pid as number);
+      if (h && !h.downed) {
+        //trust the host's final position for the body
+        h.x = msg.x as number;
+        h.y = msg.y as number;
+        h.becomeDowned(msg.fromX as number, msg.fromY as number);
+        if (h !== window.hero) {
+          window.newMessage((h.name || 'A teammate') + ' is down! Hold [Space] next to them to revive.');
+        }
+      }
+      break;
+    }
+    case 'hero_revived': {
+      const h = heroByPlayerId(msg.pid as number);
+      if (h && h.downed) {
+        h.revive();
+        window.newMessage((h === window.hero ? 'You are' : (h.name || 'Your teammate') + ' is') + ' back up!');
+      }
+      break;
+    }
+    case 'mission_lose':
+      window.applyMissionLose();
+      break;
+    case 'mission_win':
+      window.applyMissionWin();
+      window.newMessage('You escaped with the loot! Clean getaway.');
       break;
     default:
       break;

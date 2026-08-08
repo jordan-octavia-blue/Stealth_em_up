@@ -48,7 +48,9 @@ export function addKeyHandlers(){
         //this function is called every frame that said key is down
         var code = e.keyCode ? e.keyCode : e.which;
         //keyinfo[code] = String.fromCharCode(code);
-        if(hero.alive && isInCar()){
+        if(hero.downed){
+            //Down on the floor: no controls except Esc (handled below).
+        }else if(hero.alive && isInCar()){
             //Driving the van: only the car controls respond. Weapons, the bomb, the mask,
             //lockpicking and body-dragging are all unavailable until you get out (E).
             if(code == 87){keys['w'] = true;}
@@ -194,6 +196,23 @@ export function addKeyHandlers(){
                 keys['space'] = true;
                 if(!hero.drag_target){
                     if(!grid.a_door_is_being_unlocked){
+                        //revive a downed teammate — the highest-priority interact
+                        for(var rv = 0; rv < heroes.length; rv++){
+                            var mate = heroes[rv];
+                            if(mate !== hero && mate.downed && get_distance(hero.x,hero.y,mate.x,mate.y) <= hero.radius*dragDistance){
+                                newMessage('Reviving ' + (mate.name || 'your teammate') + '...');
+                                circProgBar.reset(mate.x,mate.y,3000,(function(target){
+                                    return function(){
+                                        mpAction('revive',{pid:target.playerId},function(){
+                                            reviveHero(target);
+                                        });
+                                    };
+                                })(mate));
+                                //walking away aborts the revive
+                                circProgBar.distanceCancelTarget = {x:mate.x,y:mate.y};
+                                return;
+                            }
+                        }
                             //lockpick door:
 
                         for(var i = 0; i < grid.doors.length; i++){

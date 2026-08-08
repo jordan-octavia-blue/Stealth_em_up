@@ -28,7 +28,7 @@ import {
 } from '../systems/car';
 import { loadMap } from '../map/loader';
 import { DAMAGE_AMOUNT } from '../map/tileset';
-import { mpApplyIncoming, mpCollectOutgoing, isHost as mpIsHost, isClient as mpIsClient, mpAction } from '../systems/mp';
+import { mpApplyIncoming, mpCollectOutgoing, isHost as mpIsHost, isClient as mpIsClient, isMultiplayer as mpIsMultiplayer, mpAction } from '../systems/mp';
 // Side-effect import: wires the breach FX + AI listeners onto `cell:destroyed` (roadmap
 // §6.2 pipeline steps 6-7). No exported symbols; importing it once is the whole point.
 import '../systems/breach';
@@ -261,6 +261,7 @@ window.alarmingObjects ??= undefined;//guards will sound alarm if they see an al
 			window.escape_zone ??= undefined;//[x,y,w,h] win region (Phase 7)
 			window.escape_zone_sprite ??= undefined;//the ground marker for it
 			window.hasWon ??= false;//latches the win so it fires once
+			window.hasLost ??= false;//latches the all-crew-down loss (multiplayer)
 
   
 //UI text.  Use newMessage() to add a message.
@@ -366,6 +367,7 @@ function clearStage(){
     physics.reset();
     resetCarSystem();
     hasWon = false;
+    hasLost = false;
     resetNavDebug();
     resetPhysicsDebug();
     resetBreachDebug();
@@ -1490,9 +1492,16 @@ function gameloop_getawaycar_and_loot(deltaTime){
             if(getawaycar.x >= ex && getawaycar.x <= ex+ew && getawaycar.y >= ey && getawaycar.y <= ey+eh){
                 hasWon = true;
                 newMessage("You escaped with the loot! Clean getaway.");
-                //Used to send you back to the upgrade hub to spend the payout. There is no hub
-                //and no payout any more, so the only thing left to offer is another run.
-                addButton("Play Again",window.innerWidth/2,window.innerHeight/2,function(){location.reload();});
+                if(mpIsMultiplayer()){
+                    //everyone gets the win screen; the whole party stays together
+                    //in the lobby afterwards (Esc → menu)
+                    if(window.mpBroadcastEvent)mpBroadcastEvent('mission_win',{});
+                    applyMissionWin();
+                }else{
+                    //Used to send you back to the upgrade hub to spend the payout. There is no hub
+                    //and no payout any more, so the only thing left to offer is another run.
+                    addButton("Play Again",window.innerWidth/2,window.innerHeight/2,function(){location.reload();});
+                }
                 jo_store_inc("wins");
             }
         }
@@ -1581,20 +1590,24 @@ function gameloop(deltaTime){
     //where the hero's aim runs into the world (physics raycast, §3.2)
     hero_end_aim_coord = physics.sightStop(hero.x,hero.y,mouse.x,mouse.y);
     
-    //update hero directions based on keys:
-    if(keys.w){
-        hero.target.y = hero.y - 100;
-    }else if(keys.s){
-        hero.target.y = hero.y + 100;
-    }else hero.target.y = hero.y;
-    if(keys.d){
-        hero.target.x = hero.x + 100;
-    }else if(keys.a){
-        hero.target.x = hero.x - 100;
-    }else hero.target.x = hero.x;
-    
+    //update hero directions based on keys (a downed hero is a body on the floor —
+    //no walking, and move_to_target would drag it around by direct writes since
+    //its physics body is gone):
+    if(!hero.downed){
+        if(keys.w){
+            hero.target.y = hero.y - 100;
+        }else if(keys.s){
+            hero.target.y = hero.y + 100;
+        }else hero.target.y = hero.y;
+        if(keys.d){
+            hero.target.x = hero.x + 100;
+        }else if(keys.a){
+            hero.target.x = hero.x - 100;
+        }else hero.target.x = hero.x;
+    }
+
     //Shoot if LMB is held down:
-    if(hero.gunOut && keys['LMB'] && hero.gun.automatic){
+    if(hero.gunOut && !hero.downed && keys['LMB'] && hero.gun.automatic){
         //you can only shoot if hero is masked
         //if(hero.gunDrawn && hero.gun.ammo > 0){
         if(hero.gun.ammo > 0){
@@ -2206,10 +2219,58 @@ function drop_gun(gun,x,y){
     //this is the only way a teammate's kill leaves a pickup on your floor)
     if(window.mpBroadcastEvent)mpBroadcastEvent('gun_drop',{id:drop.netId,gun:gun.name,x:x,y:y});
 }
+//One funnel for "a hero just took lethal damage". Single-player: dead, restart.
+//Co-op: downed-but-revivable — the host decides, broadcasts it, and fails the
+//mission only when the whole crew is on the floor.
 function killHero(heroUnit,fromX,fromY){
+    if(mpIsMultiplayer()){
+        //clients never decide a downing locally; the host's event does it
+        if(mpIsHost())downHero(heroUnit,fromX,fromY);
+        return;
+    }
     heroUnit.kill(fromX,fromY);
     //clear gun shot
     heroUnit.gun_shot_line.graphics.clear();
+}
+//HOST: put a hero into the downed state and check the mission-fail rule.
+function downHero(heroUnit,fromX,fromY){
+    if(heroUnit.downed || !heroUnit.alive)return;
+    heroUnit.becomeDowned(fromX,fromY);
+    heroUnit.gun_shot_line.graphics.clear();
+    if(window.mpBroadcastEvent)mpBroadcastEvent('hero_downed',{pid:heroUnit.playerId,x:heroUnit.x,y:heroUnit.y,fromX:fromX,fromY:fromY});
+    if(heroUnit !== hero)newMessage((heroUnit.name || 'A teammate') + ' is down! Hold [Space] next to them to revive.');
+    //mission fails when nobody is left standing
+    var anyStanding = false;
+    for(var i = 0; i < heroes.length; i++){
+        if(heroes[i].alive && !heroes[i].downed)anyStanding = true;
+    }
+    if(!anyStanding)missionLose();
+}
+//A teammate finished the revive channel on `target` (host/single-player direct;
+//a client's finished channel arrives as a request the host validates).
+function reviveHero(target){
+    if(!target || !target.downed)return;
+    target.revive();
+    if(window.mpBroadcastEvent)mpBroadcastEvent('hero_revived',{pid:target.playerId});
+    newMessage((target === hero ? 'You are' : (target.name || 'Your teammate') + ' is') + ' back up!');
+}
+function missionLose(){
+    if(hasLost)return;
+    hasLost = true;
+    if(window.mpBroadcastEvent)mpBroadcastEvent('mission_lose',{});
+    applyMissionLose();
+}
+//Runs on every machine (the host directly, clients via the event).
+function applyMissionLose(){
+    hasLost = true;
+    hero_is_dead();//the death music
+    messageGameOver.text = ('The whole crew is down! Press [Esc] for the menu.');
+    jo_store_inc("loses");
+}
+//Runs on every machine on victory in co-op.
+function applyMissionWin(){
+    hasWon = true;
+    messageGameOver.text = ('Clean getaway! Press [Esc] for the menu.');
 }
 window.onresize = function (event){
     var w = window.innerWidth;
@@ -2281,6 +2342,6 @@ function getMapInfo(subdir, fileName){
 // `window`. It is an ES module now, so the functions below are republished as
 // globals for the not-yet-extracted code that still reads them by bare name.
 // See src/legacy-bridge.ts. Each extraction deletes another line from here.
-Object.assign(window, { getColor, windowSetup, fullscreen, drawBloodTrail, bakeBloodTrail, getUrlVars, removeAllChildren, clearStage, startMenu, startGame, setup_map, animate, reactionTimeout, gameloop_guards, gameloop_security_cams, removeBullet, gameloop_bullets, gameloop_guard_visibility, gameloop_doors, gameloop_dragtarget, gameloop_messages_and_tooltip, gameloop_getawaycar_and_loot, gameloop_alert_animation, pickUpGunDrop, gameloop, updateDebugInfo, newMessage, newFloatingMessage, updateMessage, spawn_backup, spawn_individual_backup, alert_all_guards, unsilenced_gun, setHeroImage, setHeroImageFor, useMask, hero_is_dead, doGunShotEffects, set_latestAlert, setBomb, gameloop_bomb, explodeBomb, explodeBombFX, plantBomb, plantBombAt, drop_gun, spawnGunDrop, killHero, getMapInfo, heroSpawnPoint, spawnExtraHero, isHeroUnit, pickSeenHero, learnFace, checkUnmaskSeen, enterCar, exitCar });
+Object.assign(window, { getColor, windowSetup, fullscreen, drawBloodTrail, bakeBloodTrail, getUrlVars, removeAllChildren, clearStage, startMenu, startGame, setup_map, animate, reactionTimeout, gameloop_guards, gameloop_security_cams, removeBullet, gameloop_bullets, gameloop_guard_visibility, gameloop_doors, gameloop_dragtarget, gameloop_messages_and_tooltip, gameloop_getawaycar_and_loot, gameloop_alert_animation, pickUpGunDrop, gameloop, updateDebugInfo, newMessage, newFloatingMessage, updateMessage, spawn_backup, spawn_individual_backup, alert_all_guards, unsilenced_gun, setHeroImage, setHeroImageFor, useMask, hero_is_dead, doGunShotEffects, set_latestAlert, setBomb, gameloop_bomb, explodeBomb, explodeBombFX, plantBomb, plantBombAt, drop_gun, spawnGunDrop, killHero, downHero, reviveHero, missionLose, applyMissionLose, applyMissionWin, getMapInfo, heroSpawnPoint, spawnExtraHero, isHeroUnit, pickSeenHero, learnFace, checkUnmaskSeen, enterCar, exitCar });
 
 export {};

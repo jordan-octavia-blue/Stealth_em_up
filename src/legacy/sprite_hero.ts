@@ -4,7 +4,7 @@ If you would like to copy or use my code, you may contact
 me at jdoleary@gmail.com
 /*******************************************************/
 import { gameClock } from '../core/clock';
-import { removeHandlers } from '../systems/input';
+import { removeHandlers, addKeyHandlers } from '../systems/input';
 import { bloodParticleSplatter } from '../systems/particles';
 import { physics } from '../physics';
 function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
@@ -204,7 +204,55 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
                 }
             }
             this.health--;
-            if(this.health <= 0)this.kill(fromX,fromY);
+            //killHero routes by mode: dead in single-player, downed-but-revivable
+            //in co-op (the host decides and broadcasts it)
+            if(this.health <= 0)killHero(this,fromX,fromY);
+        }
+
+        //Downed (multiplayer): out of the fight but not dead. Looks like a corpse
+        //(guards investigate it via alarmingObjects), can't move or act, and a
+        //teammate holding the interact key next to them brings them back.
+        this.becomeDowned = function(fromX,fromY){
+            if(this.downed || !this.alive)return;
+            this.downed = true;
+            this.moving = false;
+            this.target = {x: null, y: null};
+            //let go of anything being dragged
+            if(this.drag_target){
+                this.drag_target.dragged_by = null;
+                if(this.drag_target.stop_dragging)this.drag_target.stop_dragging();
+                this.drag_target = null;
+            }
+            //a body on the floor is scenery, not an obstacle
+            physics.removeActor(this);
+            this.sprite_body.texture = (img_hero_dead);
+            this.sprite.removeChild(this.sprite_head);
+            //a downed teammate is exactly as alarming to a guard as a corpse
+            alarmingObjects.push(this);
+            var splatter_angle = grid.angleBetweenPoints(fromX,fromY,this.x,this.y);
+            bloodParticleSplatter(splatter_angle,this);
+            if(this === window.hero){
+                messageGameOver.text = ("You're down! A teammate can revive you...");
+                removeHandlers(true);//keep keyboard (Esc) but drop mouse controls
+            }
+        }
+        this.revive = function(){
+            if(!this.downed)return;
+            this.downed = false;
+            this.health = 1;
+            this.moving = true;
+            physics.addHero(this, this.radius);
+            physics.teleport(this, this.x, this.y);
+            this.sprite.addChild(this.sprite_head);
+            this.imgMaskOn(this.masked);
+            setHeroImageFor(this);
+            //no longer an alarming body on the floor
+            var ai = alarmingObjects.indexOf(this);
+            if(ai !== -1)alarmingObjects.splice(ai,1);
+            if(this === window.hero){
+                messageGameOver.text = ('');
+                addKeyHandlers();
+            }
         }
         this.kill = function(fromX,fromY){
             //display_actors.removeChild(this.sprite_head);
