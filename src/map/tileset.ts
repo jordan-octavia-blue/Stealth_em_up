@@ -19,10 +19,16 @@ import tilesetData from '../../data/tileset.json';
 
 /**
  * What a cell is made of. Walls and doors carry one of these; floors carry `null`
- * (nothing to damage). The four wall materials sit on a hardness ladder — drywall is the
- * only thing a bullet can break; steel is indestructible outright.
+ * (nothing to damage). The materials sit on a hardness ladder — `glass`, `drywall` and
+ * `wood` are the things a bullet can break; steel is indestructible outright.
+ *
+ *  - `wood` is what doors are: significantly weaker than the walls around them, and unlike
+ *    masonry it chips under gunfire — a near point-blank shotgun blast opens one outright.
+ *  - `glass` is the shootable-but-not-walkable wall: it never blocks sight or bullets (the
+ *    grid leaves its `blocks_vision` flag off), yet it still has hit points and shatters
+ *    into a walkable gap once they run out.
  */
-export type TileMaterial = 'drywall' | 'brick' | 'concrete' | 'steel';
+export type TileMaterial = 'drywall' | 'brick' | 'concrete' | 'steel' | 'wood' | 'glass';
 
 /** How a cell is being hit. Bullets are small and picky; the rest are heavy. */
 export type DamageType = 'bullet' | 'bomb' | 'frag' | 'car';
@@ -68,13 +74,14 @@ export const DAMAGE_AMOUNT: Record<DamageType, number> = {
 
 /** Which materials each kind of damage can affect at all. Steel is in no list. */
 const CAN_DAMAGE: Record<DamageType, ReadonlySet<TileMaterial>> = {
-  // A stray bullet knocks holes in drywall (shootable cover) but does nothing to masonry.
-  bullet: new Set<TileMaterial>(['drywall']),
+  // A stray bullet knocks holes in drywall (shootable cover), splinters a wooden door and
+  // shatters glass, but does nothing to masonry.
+  bullet: new Set<TileMaterial>(['drywall', 'wood', 'glass']),
   // A blast levels everything short of steel.
-  bomb: new Set<TileMaterial>(['drywall', 'brick', 'concrete']),
-  frag: new Set<TileMaterial>(['drywall', 'brick', 'concrete']),
-  // A car crashes through light walls but stops dead against concrete.
-  car: new Set<TileMaterial>(['drywall', 'brick']),
+  bomb: new Set<TileMaterial>(['drywall', 'brick', 'concrete', 'wood', 'glass']),
+  frag: new Set<TileMaterial>(['drywall', 'brick', 'concrete', 'wood', 'glass']),
+  // A car crashes through light walls, doors and glass but stops dead against concrete.
+  car: new Set<TileMaterial>(['drywall', 'brick', 'wood', 'glass']),
 };
 
 /**

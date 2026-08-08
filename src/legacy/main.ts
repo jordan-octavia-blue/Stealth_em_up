@@ -26,6 +26,7 @@ import {
 import { loadMap } from '../map/loader';
 import { DAMAGE_AMOUNT } from '../map/tileset';
 import { updateGrenades, resetGrenades } from '../systems/grenades';
+import { sprintKnockback, tickStunned } from '../systems/melee';
 // Side-effect import: wires the breach FX + AI listeners onto `cell:destroyed` (roadmap
 // §6.2 pipeline steps 6-7). No exported symbols; importing it once is the whole point.
 import '../systems/breach';
@@ -629,6 +630,7 @@ function setup_map(map){
 
     display_tiles_walls.addChild(tile_containers[0]);//add ParticleContaineres, black walls
     display_tiles_walls.addChild(tile_containers[2]);//add ParticleContaineres, brown furnature
+    display_tiles_walls.addChild(tile_containers[5]);//glass walls (translucent, drawn above the floor with the other walls)
     display_tiles.addChild(tile_containers[1]);//add ParticleContaineres
     display_tiles.addChild(tile_containers[3]);//add ParticleContaineres
     display_tiles.addChild(tile_containers[4]);//add ParticleContaineres
@@ -854,9 +856,17 @@ function gameloop_guards(deltaTime){
                 }
 
             }
-            
+
+            //Stunned by a sprinting hero running into them (src/systems/melee.ts): the
+            //guard is out for a beat — no perception, no aiming, no pathing. tickStunned
+            //bleeds off the launch velocity so the body skids back and settles; skipping the
+            //rest of the turn is what stops move_to_target from overwriting that velocity.
+            if(tickStunned(guard)){
+                continue;
+            }
+
             guard.currentlySeesHero = guard.doesSpriteSeeSprite(hero);
-        
+
                 //shooting
             //guards aim can be off by up to guard.accuracy pixels:
             var aim_x_offset = Math.floor(Math.random() * guard.accuracy);
@@ -1141,6 +1151,31 @@ function removeBullet(index){
     display_actors.removeChild(bullet.sprite);
     bullets.splice(index,1);
 }
+//Glass lets bullets pass straight through (its cells carry no VISION_BLOCKER bit, so the
+//bullet raycast never stops on them) — but the shot still chips the pane on its way past,
+//so enough rounds shatter it into a walkable gap. Walk the segment the bullet covered this
+//step in half-cell steps and damage each glass cell once per bullet (bullet.glassHit guards
+//against a slow bullet sitting in one cell over several steps).
+function damageGlassInBulletPath(bullet, x0, y0, x1, y1){
+    if(!grid)return;
+    var dx = x1-x0, dy = y1-y0;
+    var len = Math.sqrt(dx*dx+dy*dy);
+    if(len === 0)return;
+    var steps = Math.max(1, Math.ceil(len/(grid.cell_size/2)));
+    if(!bullet.glassHit)bullet.glassHit = {};
+    for(var s = 0; s <= steps; s++){
+        var t = s/steps;
+        var gi = grid.getIndexFromCoords_2d(x0+dx*t, y0+dy*t);
+        var cell = grid.getCellFromIndex(gi.x, gi.y);
+        if(cell && cell.solid && cell.material === 'glass'){
+            var idx = grid.get1DIndexFrom2DIndex(gi.x, gi.y);
+            if(!bullet.glassHit[idx]){
+                bullet.glassHit[idx] = true;
+                grid.damageCell(idx, DAMAGE_AMOUNT.bullet, 'bullet');
+            }
+        }
+    }
+}
 function gameloop_bullets(deltaTime){
     //////////////////////
     //Bullets
@@ -1166,6 +1201,9 @@ function gameloop_bullets(deltaTime){
         //anyone standing in that final gap would never be hit.
         var toX = reachedEnd ? bullet.target.x : bullet.x;
         var toY = reachedEnd ? bullet.target.y : bullet.y;
+
+        //Chip any glass this shot flew through (it never stops the bullet, only cracks).
+        damageGlassInBulletPath(bullet, fromX, fromY, toX, toY);
 
         //A guard's bullet looks for the hero, the hero's looks for guards. Guards have
         //never shot each other and Phase 4 is not the phase to start. While the hero is
@@ -1652,6 +1690,11 @@ function gameloop(deltaTime){
     updateCarPreStep();
 
     gameloop_guards(deltaTime);
+
+    //Sprinting into a guard shoves them: runs after the guards picked their velocities and
+    //before the physics step, so the launch is what gets integrated this step. The hero
+    //cannot sprint while dragging a body, matching the sprint gate in src/systems/input.ts.
+    sprintKnockback(hero, guards, keys['shift'] && !hero_drag_target);
 
     if(notifyGuardsOfHeroLocation)console.log("Repath all guards to hero last seen");
     notifyGuardsOfHeroLocation = false;
