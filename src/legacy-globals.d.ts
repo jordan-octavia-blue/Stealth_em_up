@@ -36,6 +36,7 @@ declare global {
   // jo_gun.ts
   var all_gun_prefabs: any;
   var all_gun_prefabs_without_sawed: any;
+  var gunPrefabById: any;
   var gun_machine: any;
   var gun_pistol: any;
   var gun_pistol_silenced: any;

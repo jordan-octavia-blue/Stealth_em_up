@@ -56,6 +56,29 @@ describe('loadMap — v2 fields', () => {
     const map = loadMap(v1Map({ version: 2, hpOverrides: { '3': 5 } }));
     expect(map.hpOverrides[3]).toBe(5);
   });
+
+  it('defaults doorTypes to an empty object when absent (so old maps are unchanged)', () => {
+    const map = loadMap(v1Map());
+    expect(map.doorTypes).toEqual({});
+  });
+
+  it('keeps valid per-door specs keyed by cell index', () => {
+    const map = loadMap(
+      v1Map({
+        version: 2,
+        doorTypes: { '2': { type: 'vault', group: 2, lockpickMs: 30000 } },
+      }),
+    );
+    expect(map.doorTypes[2]).toEqual({ type: 'vault', group: 2, lockpickMs: 30000 });
+  });
+
+  it('drops door specs with an invalid type', () => {
+    const map = loadMap(
+      v1Map({ version: 2, doorTypes: { '1': { type: 'reinforced' }, '2': { type: 'garbage' } } }),
+    );
+    expect(map.doorTypes[1]).toEqual({ type: 'reinforced' });
+    expect(map.doorTypes[2]).toBeUndefined();
+  });
 });
 
 describe('loadMap — validation', () => {

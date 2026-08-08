@@ -24,6 +24,7 @@ import {
   carHitByBullet,
 } from '../systems/car';
 import { loadMap } from '../map/loader';
+import { normalizeGuardEntry } from '../map/guards';
 import { DAMAGE_AMOUNT } from '../map/tileset';
 import { updateGrenades, resetGrenades } from '../systems/grenades';
 import { sprintKnockback, tickStunned } from '../systems/melee';
@@ -327,7 +328,13 @@ if(!isNaN(newVol)){
 }
 
 window.mapName = url_queryString["level"] || DEFAULT_LEVEL;
-getMapInfo("maps", mapName + ".jomap");
+//Play-from-editor handoff (Phase 10 map editor): the reserved level id "__draft__" loads the
+//map the editor stashed in localStorage instead of fetching a file from maps/.
+if (mapName === "__draft__") {
+    loadDraftMap();
+} else {
+    getMapInfo("maps", mapName + ".jomap");
+}
 
         
 function removeAllChildren(obj){
@@ -585,6 +592,15 @@ alarmingObjects = [];//guards will sound alarm if they see an alarming object (d
             currentTexture = img_shell;
             
 }
+//Phase 10 (map editor): resolve a guard's named patrol route to its index in the map's
+//patrolRoutes, or -1 if the name isn't found (the guard then falls back to auto-assign/wander).
+function routeIndexByName(map, name){
+    if(!map || !map.patrolRoutes) return -1;
+    for(var r = 0; r < map.patrolRoutes.length; r++){
+        if(map.patrolRoutes[r].name === name) return r;
+    }
+    return -1;
+}
 function setup_map(map){
     console.log('map:');
     console.log(map);
@@ -655,13 +671,32 @@ function setup_map(map){
             
 			guards = [];
             for(var i = 0; i < map.objects.guards.length; i++){
-                var hasRiotShield = randomIntFromInterval(0,2);
+                //Phase 10 (map editor): a guard entry is either the legacy [x,y] tuple
+                //(randomize loadout, wander) or an object with an explicit weapon/shield/
+                //behaviour/bank-manager flag. normalizeGuardEntry collapses both to one shape.
+                var g_conf = normalizeGuardEntry(map.objects.guards[i]);
+                //Shield: explicit when the map sets it, else the old coin-flip.
+                var hasRiotShield = (g_conf.riotShield === undefined) ? randomIntFromInterval(0,2) : (g_conf.riotShield ? 1 : 0);
                 var guard_img = hasRiotShield ? img_guard_riot_reg : img_guard_reg;
                 var guard_inst = new sprite_guard_wrapper(new PIXI.Sprite(guard_img),hasRiotShield);
-                guard_inst.x = map.objects.guards[i][0];
-                guard_inst.y = map.objects.guards[i][1];
+                guard_inst.x = g_conf.pos[0];
+                guard_inst.y = g_conf.pos[1];
+                //Weapon: an explicit id overrides the constructor's random gun; an unknown id
+                //(gunPrefabById returns null) leaves the random gun in place.
+                if(g_conf.weapon){
+                    var gun_prefab = gunPrefabById(g_conf.weapon);
+                    if(gun_prefab) guard_inst.gun = gun_prefab.make_copy();
+                }
+                //Behaviour + bank-manager flag (read by sprite_guard's patrol and kill()).
+                guard_inst.behavior = g_conf.behavior;
+                guard_inst.isBankManager = g_conf.isBankManager;
                 physics.addGuard(guard_inst, guard_inst.radius);
                 squad.addGuard(guard_inst);
+                //A 'route' guard is pinned to its named route (name → index); others keep -1
+                //and either auto-assign a route (legacy) or wander ('random').
+                if(g_conf.behavior && g_conf.behavior.kind === 'route'){
+                    guard_inst.patrolRouteIndex = routeIndexByName(map, g_conf.behavior.route);
+                }
                 guard_inst.getRandomPatrolPath();
                 guards.push(guard_inst);
             }
@@ -2170,6 +2205,24 @@ window.onresize = function (event){
 }
 /*Get map from server:*/
 window.map_json = "";
+//Play-from-editor handoff (Phase 10 map editor). The editor writes a validated map under this
+//localStorage key and opens game.html?level=__draft__; we load that here rather than fetching
+//from maps/. The key and level id are kept in sync with src/editor/persistence.ts.
+function loadDraftMap(){
+    try {
+        var raw = localStorage.getItem("stealth.play.__draft__");
+        if (!raw) {
+            alert("No editor map found. Build a map in the editor and press Play.");
+            return;
+        }
+        var map = loadMap(JSON.parse(raw));
+        map_json = map;
+        console.log("map loaded from editor draft");
+        windowSetup();
+    } catch (e) {
+        alert("Couldn't load the editor map: " + (e && (e as Error).message ? (e as Error).message : e));
+    }
+}
 function getMapInfo(subdir, fileName){
     fetch(subdir + "/" + fileName).then(function(response) {
         if (!response.ok) throw new Error("HTTP " + response.status);
