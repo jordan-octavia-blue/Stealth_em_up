@@ -168,14 +168,14 @@ export function addKeyHandlers(){
             if(code == 16){
                 keys['shift'] = true;
                 //cannot sprint while dragging something
-                if(!hero_drag_target){
+                if(!hero.drag_target){
                     hero.speed = hero.speed_sprint;
                 }
 
             }
             if(code == 32){
                 keys['space'] = true;
-                if(!hero_drag_target){
+                if(!hero.drag_target){
                     if(!grid.a_door_is_being_unlocked){
                             //lockpick door:
 
@@ -199,6 +199,9 @@ export function addKeyHandlers(){
                         //check if any dead guards are close enough to be dragged.
                         for(var i = 0; i < guards.length; i++){
                             var guard = guards[i];
+                            //a guard already claimed by a teammate (dragged or being
+                            //choked) is spoken for — two players can't grab one guard.
+                            if(guard.dragged_by && guard.dragged_by !== hero)continue;
                             if(get_distance(hero.x,hero.y,guard.x,guard.y) <= hero.radius*dragDistance){
 
                                 //check if any dead guards are close enough to be dragged.
@@ -207,9 +210,10 @@ export function addKeyHandlers(){
 
                                     //slow down hero speed because he just started dragging something.
                                     hero.speed = hero.speed/2;
-                                    hero_drag_target = guard;
-                                    hero_drag_target.speed = hero.speed;
-                                    hero_drag_target.stop_distance = hero.radius*2;//I don't know why but the stop distance here seems to need to be bigger by a factor of 10
+                                    hero.drag_target = guard;
+                                    guard.dragged_by = hero;
+                                    guard.speed = hero.speed;
+                                    guard.stop_distance = hero.radius*2;//I don't know why but the stop distance here seems to need to be bigger by a factor of 10
                                     //return;//don't return, this allows choking out a guard to have higher precedence than dragging a body
                                 }else{
                                     //hero is choking out a live guard who is not already alarmed:
@@ -230,21 +234,26 @@ export function addKeyHandlers(){
                                     physics.removeActor(guard);
                                     //slow down hero speed because he just started dragging something.
                                     hero.speed = hero.speed_walk/2;
-                                    hero_drag_target = guard;
-                                    hero_drag_target.speed = hero.speed;
-                                    hero_drag_target.stop_distance = hero.radius*2;//I don't know why but the stop distance here seems to need to be bigger by a factor of 10
+                                    hero.drag_target = guard;
+                                    guard.dragged_by = hero;
+                                    guard.speed = hero.speed;
+                                    guard.stop_distance = hero.radius*2;//I don't know why but the stop distance here seems to need to be bigger by a factor of 10
+                                    //the choke belongs to THIS hero — capture it so the
+                                    //timer works when several players drag at once
+                                    var chokingHero = hero;
                                     gameClock.after(hero.ability_choke_speed, function(){
-                                        //check that the guard is still being choked out, if not, he's not dead so don't kill() him
-                                        if(hero_drag_target == this){
+                                        //check that the guard is still being choked out by that hero; if not, he's not dead so don't kill() him
+                                        if(chokingHero.drag_target == this){
                                             newMessage('The guard is dispached!');
                                             this.kill();
                                             //if space isn't still being held release body:
                                             if(!keys['space']){
                                                 //drag is a toggle action so release current drag target.
-                                                hero_drag_target.stop_dragging();
-                                                hero_drag_target = null;
+                                                this.stop_dragging();
+                                                this.dragged_by = null;
+                                                chokingHero.drag_target = null;
                                                 //bring hero speed back to normal
-                                                hero.speed = hero.speed_walk;
+                                                chokingHero.speed = chokingHero.speed_walk;
                                             }
                                         }
                                     }.bind(guard));
@@ -312,17 +321,18 @@ export function addKeyHandlers(){
         }
         if(code == 16){
             keys['shift'] = false;
-            if(hero_drag_target==null){
+            if(hero.drag_target==null){
                 hero.speed = hero.speed_walk;
             }
         }
         if(code == 32){
             keys['space'] = false;
             //if hero was dragging something, drop it. (Don't drop a guard while he's being choked
-            if(hero_drag_target && !hero_drag_target.alive){
+            if(hero.drag_target && !hero.drag_target.alive){
                 //drag is a toggle action so release current drag target.
-                hero_drag_target.stop_dragging();
-                hero_drag_target = null;
+                hero.drag_target.stop_dragging();
+                hero.drag_target.dragged_by = null;
+                hero.drag_target = null;
                 //bring hero speed back to normal
                 hero.speed = hero.speed_walk;
             }
@@ -346,7 +356,7 @@ export function addKeyHandlers(){
         clickEvent = e;
         if(clickEvent.which === 1){
             //LMB
-            if(hero_drag_target){
+            if(hero.drag_target){
                 newFloatingMessage("You cannot shoot while dragging a body!",{x:hero.x,y:hero.y},"#FFaa00");
                 return;
             }
@@ -369,7 +379,7 @@ export function addKeyHandlers(){
                         ejectShell(hero);
 
                         hero.shoot();
-                        if(!hero.gun.silenced)unsilenced_gun();//make noise (not real sound, but noise for guards) which draws guards
+                        if(!hero.gun.silenced)unsilenced_gun(hero);//make noise (not real sound, but noise for guards) which draws guards
                         window.mouse_click_obj = camera.objectivePoint_ignore_shake(clickEvent);  //uses clickEvent's .x and .y to find objective click
 
 

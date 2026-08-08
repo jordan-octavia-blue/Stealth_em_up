@@ -94,7 +94,8 @@ function security_camera_wrapper(pixiSprite,x,y,maxswivel,minswivel){
                     gameClock.after(2000, function(){
                         if(this.alive){
                             newMessage('All the other guards are on alert!');
-                            alert_all_guards();
+                            //the radius is centred on the camera that saw something
+                            alert_all_guards(this);
                         };
                     }.bind(this));
                 }

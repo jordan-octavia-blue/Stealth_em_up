@@ -216,10 +216,10 @@ declare global {
   var heroes: any;
   var heroSpawnPoint: any;
   var spawnExtraHero: any;
-  var hero_drag_target: any;
   var hero_end_aim_coord: any;
   var hero_is_dead: any;
   var hero_last_seen: any;
+  var last_seen_active: any;
   var keys: any;
   var killHero: any;
   var lastTimeStamp: any;

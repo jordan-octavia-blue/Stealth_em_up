@@ -18,6 +18,10 @@ import {
   initCar,
   resetCarSystem,
   isInCar,
+  isHeroInCar,
+  isVanOccupied,
+  enterCar,
+  exitCar,
   updateCarPreStep,
   updateCarPostStep,
   carHitByBullet,
@@ -233,7 +237,6 @@ window.bullets ??= undefined;
             window.hero_end_aim_coord ??= undefined;
 
 			
-			window.hero_drag_target ??= undefined; // a special var reserved for when the hero is dragging something.
 			window.guards ??= undefined;
             window.guard_backup_spawn ??= undefined;
             window.numOfBackupGuards ??= undefined;
@@ -661,7 +664,6 @@ function setup_map(map){
             //dynamic circle, fixedRotation — facing stays a game-logic angle (§3.2)
             physics.addHero(hero, hero.radius);
 			hero.speed = hero.speed_walk;
-            hero_drag_target = null; // a special var reserved for when the hero is dragging something.
             heroes = [hero];
             //Debug drill (?players=N): spawn N-1 input-less dummy heroes so every
             //multi-hero code path (guard targeting, per-hero drag, revive) can be
@@ -675,6 +677,8 @@ function setup_map(map){
             
 			hero_last_seen = new jo_sprite(new PIXI.Sprite(img_lastSeen));
             hero_last_seen.sprite.visible = false;
+            //no sighting yet this run (squad-level marker; any hero's sighting sets it)
+            last_seen_active = false;
             
             
 			guards = [];
@@ -797,9 +801,56 @@ Game Loop
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 function reactionTimeout(){
-    //allow sprite to shoot again if he still sees hero
-    if(this.doesSpriteSeeSprite(hero))this.can_shoot = true;
+    //allow sprite to shoot again if he still sees the hero he was reacting to
+    var target = this.seenHero || pickSeenHero(this);
+    if(target && this.doesSpriteSeeSprite(target))this.can_shoot = true;
     this.reacting = false;
+}
+//Is this unit one of the heroes (local or a teammate)? Bullets, doors and vision
+//code ask this instead of `=== hero` now that there can be up to four of them.
+function isHeroUnit(unit){
+    return heroes ? heroes.indexOf(unit) !== -1 : unit === hero;
+}
+//Does this observer (guard or camera) already know this particular player's face?
+//Faces are remembered per player; `knowsHerosFace` stays the "knows anyone" rollup
+//because the guard textures key off it.
+function observerKnowsFace(observer, h){
+    return !!(observer.knowsFaceOf && observer.knowsFaceOf[h.playerId]);
+}
+function learnFace(observer, h){
+    if(!observer.knowsFaceOf)observer.knowsFaceOf = {};
+    observer.knowsFaceOf[h.playerId] = true;
+    observer.knowsHerosFace = true;
+}
+//Which hero is this observer reacting to this tick: the nearest visible one who is
+//either doing something alarming right now (willCauseAlert) or whose face this
+//observer already knows. Downed heroes never come back as targets — they alarm
+//guards through alarmingObjects like any other body on the floor.
+function pickSeenHero(observer){
+    var best = null;
+    var bestDist = Infinity;
+    for(var i = 0; i < heroes.length; i++){
+        var h = heroes[i];
+        if(!h.alive || h.downed)continue;
+        if(!(h.willCauseAlert() || observerKnowsFace(observer, h)))continue;
+        if(!observer.doesSpriteSeeSprite(h))continue;
+        var d = get_distance(observer.x,observer.y,h.x,h.y);
+        if(d < bestDist){ best = h; bestDist = d; }
+    }
+    return best;
+}
+//The nearest living, not-downed hero — what an alarmed guard aims toward while
+//waiting for a clear sight line.
+function nearestHero(observer){
+    var best = hero;
+    var bestDist = Infinity;
+    for(var i = 0; i < heroes.length; i++){
+        var h = heroes[i];
+        if(!h.alive || h.downed)continue;
+        var d = get_distance(observer.x,observer.y,h.x,h.y);
+        if(d < bestDist){ best = h; bestDist = d; }
+    }
+    return best;
 }
 function gameloop_guards(deltaTime){
     for(var i = 0; i < guards.length; i++){
@@ -837,21 +888,25 @@ function gameloop_guards(deltaTime){
 
             }
             
-            guard.currentlySeesHero = guard.doesSpriteSeeSprite(hero);
-        
+            //Which hero (if any) is this guard reacting to this tick. `seenHero` is the
+            //multi-hero generalisation of the old "does the guard see THE hero" check:
+            //nearest visible hero who is being alarming or whose face this guard knows.
+            guard.seenHero = pickSeenHero(guard);
+            guard.currentlySeesHero = !!guard.seenHero;
+
                 //shooting
             //guards aim can be off by up to guard.accuracy pixels:
             var aim_x_offset = Math.floor(Math.random() * guard.accuracy);
             var aim_y_offset = Math.floor(Math.random() * guard.accuracy);
             //only set aim if they are able to shoot again, don't reset aim every loop
             if(guard.can_shoot){
-                
+                var aimAt = guard.seenHero || nearestHero(guard);
                 //take the ray from guard to hero and make it go all the way to the wall:
-                var guard_aim_to_wall = physics.sightStop(guard.x,guard.y,hero.x+aim_x_offset,hero.y+aim_y_offset);
+                var guard_aim_to_wall = physics.sightStop(guard.x,guard.y,aimAt.x+aim_x_offset,aimAt.y+aim_y_offset);
                 guard.aim.set(guard.x,guard.y,guard_aim_to_wall.x,guard_aim_to_wall.y);
             }
-            
-            
+
+
             //if guard are not already alarmed
             if(!guard.alarmed  && !guard.being_choked_out){
                 //check if guard sees alarming objects:
@@ -861,59 +916,58 @@ function gameloop_guards(deltaTime){
                         guard.seeAlarmingObject(alarmingObjects[j]);
                     }
                 }
-                //check if guard sees hero:
-                if(!guard.being_choked_out && guard.currentlySeesHero){
-                    if(hero.willCauseAlert() || guard.knowsHerosFace){
-                        //guard will remember hero's face unless hero is masked:
-                        if(!hero.masked){
-                            guard.knowsHerosFace = true;
-                        }
-                        newMessage('A guard has seen you being suspicious!');
-                        //alarm if hero is seen masked
-                        guard.seeAlarmingObject(hero);
-                        
-                        //show alert icon for this guard:
-                        set_latestAlert(guard);
-                        
-                        //rotate guard to face hero:
-                        guard.target_rotate = hero;
-                        
-                        //set lastSeen for investigating hero
-                        hero.setLastSeen(guard);
-                        guard.sawHeroLastAt = {x:hero.x,y:hero.y};
+                //check if guard sees a hero being suspicious:
+                if(!guard.being_choked_out && guard.seenHero){
+                    var seen = guard.seenHero;
+                    //guard will remember that player's face unless they are masked:
+                    if(!seen.masked){
+                        learnFace(guard, seen);
                     }
-                    
+                    newMessage(seen === hero ? 'A guard has seen you being suspicious!' : 'A guard has seen ' + (seen.name || 'your partner') + ' being suspicious!');
+                    //alarm if hero is seen masked
+                    guard.seeAlarmingObject(seen);
+
+                    //show alert icon for this guard:
+                    set_latestAlert(guard);
+
+                    //rotate guard to face hero:
+                    guard.target_rotate = seen;
+
+                    //set lastSeen for investigating hero
+                    seen.setLastSeen(guard);
+                    guard.sawHeroLastAt = {x:seen.x,y:seen.y};
                 }else{
                     //guard doesn't see hero so set target_rotate to null so guard can rotate where he moves again
                     guard.target_rotate = null;
                 }
             }else{
                 //guard is alarmed:
-                if(!guard.being_choked_out && guard.currentlySeesHero){
-                    //guard is not being choked out and sees hero
-                    if((hero.willCauseAlert() || guard.knowsHerosFace) && hero.alive){
-                        //guard will remember hero's face unless hero is masked:
-                        if(!hero.masked){
-                            guard.knowsHerosFace = true;
+                if(!guard.being_choked_out && guard.seenHero){
+                    //guard is not being choked out and sees a hero worth engaging
+                    var engaged = guard.seenHero;
+                    {
+                        //guard will remember that player's face unless they are masked:
+                        if(!engaged.masked){
+                            learnFace(guard, engaged);
                             guard.sprite_body.texture = guard.hasRiotShield ? img_guard_riot_knows_face : img_guard_knows_hero_face;//show that this guard knows your face:
                         }
                         //reset target
                         guard.moving = false;
-                        guard.target_rotate = hero;
-                        
+                        guard.target_rotate = engaged;
+
                         if(guard.can_shoot){
-                            
+
                             doGunShotEffects(guard, false);//plays sound
-                            
+
                             guard.shoot();
                             ejectShell(guard);
-                            
+
                             //increase guard's accuracy every time they shoot, for gameplay reasons
                             if(guard.accuracy > 10)guard.accuracy -= 10;
                             else guard.accuracy = 0;
-                            
-            
-                            
+
+
+
                         }else{
                             //if guard can't shoot yet (reaction time)
                             if(!guard.reacting){
@@ -921,27 +975,27 @@ function gameloop_guards(deltaTime){
                                 gameClock.after(guard.shoot_speed, reactionTimeout.bind(guard));
                             }
                         }
-                        
+
                         //show alert icon for this guard:
                         set_latestAlert(guard);
-                        
+
                         //set lastSeen for investigating hero
-                        hero.setLastSeen(guard);
-                        guard.sawHeroLastAt = {x:hero.x,y:hero.y};
+                        engaged.setLastSeen(guard);
+                        guard.sawHeroLastAt = {x:engaged.x,y:engaged.y};
                     }
                 }else{
-                    
+
                     //if guard is alarmed rotate to the next waypoint so they peer around corners.
                     //~guard doesn't see hero so set target_rotate to null so guard can rotate where he moves again
                     //don't change rotation unless the guard is close to the point (this keeps them from walking backwards [bug])
                     if(guard.path[0] && get_distance(guard.x,guard.y,guard.path[0].x,guard.path[0].y) < 100)guard.target_rotate = guard.path[0];
-                
-                    //if alarmed move to last place hero was seen
-                    if(notifyGuardsOfHeroLocation || !guard.chasingHero && hero.lastSeenX && hero.lastSeenY){
+
+                    //if alarmed move to the last place ANY hero was seen (squad-level marker)
+                    if(notifyGuardsOfHeroLocation || !guard.chasingHero && last_seen_active){
                         //this is only called once due to .chasingHero
                         //repath to hero pos
                         guard.moving = true;
-                        guard.pathToCoords(hero.lastSeenX,hero.lastSeenY);
+                        guard.pathToCoords(hero_last_seen.x,hero_last_seen.y);
                         guard.chasingHero = true;
                     }
                 }
@@ -1023,38 +1077,29 @@ function gameloop_security_cams(deltaTime){
                         cam.seeAlarmingObject(alarmingObjects[j]);
                     }
                 }
-                //check if security_camera sees hero:
-                if(cam.doesSpriteSeeSprite(hero)){
-                    //alarm if hero is seen masked
-                    if(hero.willCauseAlert()){
-                        newMessage('A security camera has seen you being suspicious!');
-                        cam.seeAlarmingObject(hero);
-                        
-                        //THIS DOESN"T WORK YET:
-                        //rotate cam to face hero:
-                        cam.rotate_to(hero.x,hero.y);
-                        //
-                        
-                        set_latestAlert(cam);
-                        //set lastSeen for investigating hero
-                        hero.setLastSeen(null);
-                        
-                        
-                        
-                    }
+                //check if the camera sees any hero being suspicious:
+                var camSeen = pickSeenHero(cam);
+                if(camSeen){
+                    newMessage(camSeen === hero ? 'A security camera has seen you being suspicious!' : 'A security camera has seen ' + (camSeen.name || 'your partner') + ' being suspicious!');
+                    cam.seeAlarmingObject(camSeen);
+
+                    //THIS DOESN"T WORK YET:
+                    //rotate cam to face hero:
+                    cam.rotate_to(camSeen.x,camSeen.y);
+                    //
+
+                    set_latestAlert(cam);
+                    //set lastSeen for investigating hero — cameras broadcast immediately
+                    camSeen.setLastSeen(null);
                 }
             }else{
-                //if camera is already alarmed, check to update hero position:
-                 //check if security_camera sees hero:
-                if(cam.doesSpriteSeeSprite(hero)){
-                    //alarm if hero is seen masked
-                    if(hero.masked){
-                        
-                        set_latestAlert(cam);
-                        //set lastSeen for investigating hero
-                        hero.setLastSeen(null);
-                        
-                    }
+                //if camera is already alarmed, keep updating the position of any
+                //masked hero it can see:
+                var camTracked = pickSeenHero(cam);
+                if(camTracked && camTracked.masked){
+                    set_latestAlert(cam);
+                    //set lastSeen for investigating hero
+                    camTracked.setLastSeen(null);
                 }
             }
             
@@ -1115,23 +1160,29 @@ function gameloop_bullets(deltaTime){
         var toX = reachedEnd ? bullet.target.x : bullet.x;
         var toY = reachedEnd ? bullet.target.y : bullet.y;
 
-        //A guard's bullet looks for the hero, the hero's looks for guards. Guards have
-        //never shot each other and Phase 4 is not the phase to start. While the hero is
+        //A hero's bullet looks for guards, a guard's looks for heroes. Guards have
+        //never shot each other and Phase 4 is not the phase to start. While a hero is
         //driving, their body is out of the world and the van (CATEGORY.CAR) is the thing
-        //standing where the hero is — so a guard's shot has to be able to hit the van.
-        var mask = CATEGORY.VISION_BLOCKER | (bullet.ignore == hero ? CATEGORY.GUARD : CATEGORY.HERO);
-        if(bullet.ignore != hero && isInCar())mask |= CATEGORY.CAR;
+        //standing where they are — so a guard's shot has to be able to hit the van.
+        var firedByHero = isHeroUnit(bullet.ignore);
+        var mask = CATEGORY.VISION_BLOCKER | (firedByHero ? CATEGORY.GUARD : CATEGORY.HERO);
+        if(!firedByHero && isVanOccupied())mask |= CATEGORY.CAR;
         var hit = physics.bulletHit(fromX,fromY,toX,toY,bullet.ignore,mask);
 
         //A dragged corpse and a security camera have no physics body — a corpse gives up
         //its body when it dies so it can be dragged. Two explicit checks rather than two
-        //more collision categories.
-        if(bullet.ignore != hero && hero_drag_target && circle_linesetment_intersect(hero_drag_target.getCircleInfoForUtilityLib(),{x:fromX,y:fromY},{x:toX,y:toY})){
-            if(hero_drag_target.alive)hero_drag_target.kill();
-            bloodParticleSplatter(grid.angleBetweenPoints(fromX,fromY,hero_drag_target.x,hero_drag_target.y),hero_drag_target);
-            removeBullet(b);
-            b--;
-            continue bulletLoop;
+        //more collision categories. Any hero may be dragging something.
+        if(!firedByHero){
+            for(var hd = 0; hd < heroes.length; hd++){
+                var dragged = heroes[hd].drag_target;
+                if(dragged && circle_linesetment_intersect(dragged.getCircleInfoForUtilityLib(),{x:fromX,y:fromY},{x:toX,y:toY})){
+                    if(dragged.alive)dragged.kill();
+                    bloodParticleSplatter(grid.angleBetweenPoints(fromX,fromY,dragged.x,dragged.y),dragged);
+                    removeBullet(b);
+                    b--;
+                    continue bulletLoop;
+                }
+            }
         }
         for(var i = 0; i < security_cameras.length; i++){
             if(circle_linesetment_intersect(security_cameras[i].getCircleInfoForUtilityLib(),{x:fromX,y:fromY},{x:toX,y:toY})){
@@ -1142,12 +1193,12 @@ function gameloop_bullets(deltaTime){
         if(hit && hit.owner){
             var victim: any = hit.owner;
             if((hit.category & CATEGORY.CAR) !== 0){
-                //The shot hit the getaway van the hero is driving: bodywork takes the hit,
+                //The shot hit the occupied getaway van: bodywork takes the hit,
                 //with a small chance the round finds the driver. Not treated like a guard —
                 //the van has no `kill()` and dying is handled inside carHitByBullet.
                 carHitByBullet(bullet.ignore.x,bullet.ignore.y);
-            }else if(victim === hero){
-                if(hero.alive)hero.hurt(bullet.ignore.x,bullet.ignore.y);
+            }else if(isHeroUnit(victim)){
+                if(victim.alive)victim.hurt(bullet.ignore.x,bullet.ignore.y);
             }else if(victim.alive){
                 var guardDies = true;
                 //The angle is from the shooter and not the bullet, because a bullet that
@@ -1213,21 +1264,27 @@ function gameloop_doors(deltaTime){
         var openers = physics.openersNear(door_wall.cellIndex());
         openers.forEach(function(unit: any){
             //this radius is very important!  If door_inst doesn't detect unit close enough, the "wall" tile that it is on will be solid and unit won't be able to get close enough
-            if(unit !== hero && unit.alive && get_distance(door_center_x,door_center_y,unit.x,unit.y) <= unit.radius*4){
+            //Guards open doors freely; heroes go through the unlocked-door path below.
+            if(!isHeroUnit(unit) && unit.alive && get_distance(door_center_x,door_center_y,unit.x,unit.y) <= unit.radius*4){
                 door_inst.openerNear = true;
             }
         });
-        //if hero can open door_inst:
-        //this radius is very important!  If door_inst doesn't detect unit close enough, the "wall" tile that it is on will be solid and unit won't be able to get close enough
+        //an unlocked door opens for ANY hero standing at it (local or teammate):
+        for(var hi = 0; hi < heroes.length; hi++){
+            var hUnit = heroes[hi];
+            if(door_inst.unlocked && hUnit.alive && get_distance(door_center_x,door_center_y,hUnit.x,hUnit.y) <= hUnit.radius*4){
+                door_inst.openerNear = true;
+            }
+        }
+        //the LOCAL hero's door interactions (kick, tooltip):
         if(get_distance(door_center_x,door_center_y,hero.x,hero.y) <= hero.radius*4){
-            if(door_inst.unlocked)door_inst.openerNear = true;
             //if hero is sprinting and able to kick down doors:
             if(hero.ability_kick_doors && keys['shift']){
                 door_inst.open();
                 door_inst.broken = true;
             }
-            
-            
+
+
             //if hero is near a door, show tooltip to open door
             if(hero.alive){
                 tooltip.visible = true;
@@ -1275,22 +1332,25 @@ function gameloop_dragtarget(deltaTime){
         }
     }
     
-    //move sprite/item which the hero is dragging.
-    if(hero_drag_target){
-        hero_drag_target.target = {x: hero.x , y: hero.y};//the drag target is "following" the hero.
-        hero_drag_target.get_dragged();
+    //move whatever each hero is dragging (every player can drag their own body).
+    for(var dh = 0; dh < heroes.length; dh++){
+        var dragger = heroes[dh];
+        var drag_target = dragger.drag_target;
+        if(!drag_target)continue;
+        drag_target.target = {x: dragger.x , y: dragger.y};//the drag target is "following" its dragger.
+        drag_target.get_dragged();
         //leaves blood trail behind as you drag.
-        if(hero_drag_target.blood_trail){
+        if(drag_target.blood_trail){
             //Blood trail with random variation for prettiness
             var blood_x_mod = randomFloatWithBias2(-10,10);
             var blood_y_mod = randomFloatWithBias2(-10,10);
-            var blood_size_mod = randomFloatWithBias2(1,hero_drag_target.blood_trail_size);
-            var skip_blood_draw = randomFloatFromInterval(0,hero_drag_target.blood_trail_skip_frequency);
+            var blood_size_mod = randomFloatWithBias2(1,drag_target.blood_trail_size);
+            var skip_blood_draw = randomFloatFromInterval(0,drag_target.blood_trail_skip_frequency);
             //blood drip frequency and size decreases the longer that unit is dragged.
-            if(hero_drag_target.blood_trail_size > 3)hero_drag_target.blood_trail_size-=0.01;
-            hero_drag_target.blood_trail_skip_frequency+=0.01;
-            
-            if(skip_blood_draw <= 1)drawBloodTrail(hero_drag_target.x+blood_x_mod,hero_drag_target.y+blood_y_mod,blood_size_mod);
+            if(drag_target.blood_trail_size > 3)drag_target.blood_trail_size-=0.01;
+            drag_target.blood_trail_skip_frequency+=0.01;
+
+            if(skip_blood_draw <= 1)drawBloodTrail(drag_target.x+blood_x_mod,drag_target.y+blood_y_mod,blood_size_mod);
         }
     }
 }
@@ -1344,31 +1404,47 @@ function gameloop_getawaycar_and_loot(deltaTime){
     }
     
     //pickup loot if close enough — on foot only (you can't grab it through the windscreen).
-    if(!hero.carry && !isInCar()){
-        //check if hero is close enough to the loot to pick it up
+    //Any hero can be the money carrier.
+    for(var lh = 0; lh < heroes.length; lh++){
+        var lootHero = heroes[lh];
+        if(lootHero.carry || !lootHero.alive || lootHero.downed || isHeroInCar(lootHero))continue;
+        //check if this hero is close enough to the loot to pick it up
         for(var i = 0; i < loot.length; i++){
-            if(get_distance(hero.x,hero.y,loot[i].x,loot[i] .y) <= hero.radius*2){
-                hero.carry = loot[i];
+            if(!loot[i].sprite.visible)continue;//already carried by someone
+            if(get_distance(lootHero.x,lootHero.y,loot[i].x,loot[i] .y) <= lootHero.radius*2){
+                lootHero.carry = loot[i];
                 loot[i].sprite.visible = false;
                 //hero.sprite.texture = (img_hero_with_money);
-                newMessage("You've got the money!  Get it to the van and drive to the escape zone!");
+                newMessage(lootHero === hero
+                    ? "You've got the money!  Get it to the van and drive to the escape zone!"
+                    : (lootHero.name || 'Your partner') + " has the money!  Everyone to the van!");
                 break;
             }
         }
     }
 
-    //Win condition (roadmap §7): the getaway is an escape *drive*. You win when you are in
-    //the van, carrying the loot, and the van reaches the escape zone — not by walking the
-    //money up to a parked prop. The old 95px on-foot proximity win is gone.
-    if(!hasWon && isInCar() && hero.carry && escape_zone){
-        var ex = escape_zone[0], ey = escape_zone[1], ew = escape_zone[2], eh = escape_zone[3];
-        if(getawaycar.x >= ex && getawaycar.x <= ex+ew && getawaycar.y >= ey && getawaycar.y <= ey+eh){
-            hasWon = true;
-            newMessage("You escaped with the loot! Clean getaway.");
-            //Used to send you back to the upgrade hub to spend the payout. There is no hub
-            //and no payout any more, so the only thing left to offer is another run.
-            addButton("Play Again",window.innerWidth/2,window.innerHeight/2,function(){location.reload();});
-            jo_store_inc("wins");
+    //Win condition (roadmap §7): the getaway is an escape *drive*. The crew wins when
+    //the loot is aboard, every hero still standing is aboard, and the van reaches the
+    //escape zone. Downed teammates can be left behind (a hard call, but the heist pays).
+    if(!hasWon && escape_zone){
+        var lootAboard = false;
+        var everyoneAboard = true;
+        for(var wh = 0; wh < heroes.length; wh++){
+            var crewHero = heroes[wh];
+            if(!crewHero.alive || crewHero.downed)continue;//dead/downed don't hold up the van
+            if(!isHeroInCar(crewHero)){ everyoneAboard = false; break; }
+            if(crewHero.carry)lootAboard = true;
+        }
+        if(everyoneAboard && lootAboard){
+            var ex = escape_zone[0], ey = escape_zone[1], ew = escape_zone[2], eh = escape_zone[3];
+            if(getawaycar.x >= ex && getawaycar.x <= ex+ew && getawaycar.y >= ey && getawaycar.y <= ey+eh){
+                hasWon = true;
+                newMessage("You escaped with the loot! Clean getaway.");
+                //Used to send you back to the upgrade hub to spend the payout. There is no hub
+                //and no payout any more, so the only thing left to offer is another run.
+                addButton("Play Again",window.innerWidth/2,window.innerHeight/2,function(){location.reload();});
+                jo_store_inc("wins");
+            }
         }
     }
 }
@@ -1479,10 +1555,10 @@ function gameloop(deltaTime){
             events.emit('camera:kickback');
             ejectShell(hero);
             hero.shoot();
-            if(!hero.gun.silenced)unsilenced_gun();//make noise (not real sound, but noise for guards) which draws guards
+            if(!hero.gun.silenced)unsilenced_gun(hero);//make noise (not real sound, but noise for guards) which draws guards
             window.mouse_click_obj = camera.objectivePoint_ignore_shake(clickEvent);  //uses clickEvent's .x and .y to find objective click
-            
-            
+
+
         }else{
             //set shake decay if out of bullets
             camera.shakeDecay = 1.5;
@@ -1565,11 +1641,11 @@ function gameloop(deltaTime){
     for(var i = 0; i < grid.cells.length; i++){
         grid.cells[i].prepare_for_draw();
     }
-    if(hero.alive && !hero_drag_target){
+    if(hero.alive && !hero.drag_target){
         hero.target_rotate = mouse;
         hero.rotate_to_instant(mouse.x,mouse.y);
-    }else if(hero_drag_target){
-        hero.target_rotate = hero_drag_target;
+    }else if(hero.drag_target){
+        hero.target_rotate = hero.drag_target;
     }else{
         hero.target_rotate = null;
     }
@@ -1611,7 +1687,12 @@ function gameloop(deltaTime){
     //step — guards run over, weak walls breached — and lead the camera.
     updateCarPostStep(deltaTime);
 
-    hero.prepare_for_draw();
+    //every hero draws — the local one, the ?players=N dummies, remote teammates.
+    //Order matters for guard vision: doesSpriteSeeSprite reads sprite.rotation,
+    //which this writes, so every hero must run it every tick.
+    for(var i = 0; i < heroes.length; i++){
+        heroes[i].prepare_for_draw();
+    }
     for(var i = 0; i < guards.length; i++){
         guards[i].prepare_for_draw();
     }
@@ -1699,7 +1780,7 @@ function updateDebugInfo(){
         "inOffLimits: " + hero.inOffLimits + "<br>" +
         "lockpicking: " + hero.lockpicking + "<br>" +
         "plantingBomb: " + hero.plantingBomb + "<br>" +
-        "Dragging: " + hero_drag_target + "<br>" +
+        "Dragging: " + hero.drag_target + "<br>" +
         "gotMoney: " + hero.carry + "<br>" +
         "mouse: " + Math.round(mouse.x) + "," + Math.round(mouse.y) + "<br>" +
         "corner: " + screenCorner.x + "," + screenCorner.y + "<br>"
@@ -1751,25 +1832,30 @@ function spawn_individual_backup(){
     guards.push(newGuard);
 
 }
-function alert_all_guards(){
+function alert_all_guards(pos){
+    //`pos` is where the alarming thing happened (the guard/camera that saw it, the
+    //shooter, the bomb). Guards within 500px of THAT spot alarm — it was never
+    //really about the hero, the hero just used to be the only possible source.
+    pos = pos || hero;
     for(var z = 0; z < guards.length; z++){
         //alert the other living guards that are 500 distance away
-        if(guards[z].alive && get_distance(hero.x,hero.y,guards[z].x,guards[z].y)<500)guards[z].becomeAlarmed();
+        if(guards[z].alive && get_distance(pos.x,pos.y,guards[z].x,guards[z].y)<500)guards[z].becomeAlarmed();
     }
     if(!backupCalled){
         //this part cannot repeat in the same game
         backupCalled = true;
         //spawn backup:
         spawn_backup();
-        
+
     }
-    
+
 }
-function unsilenced_gun(){
-    //makes a sound and draws all guards:
-    alert_all_guards();
+function unsilenced_gun(shooter){
+    //makes a sound and draws all guards to the shooter:
+    shooter = shooter || hero;
+    alert_all_guards(shooter);
     //set lastSeen for investigating hero
-    hero.setLastSeen(null);
+    shooter.setLastSeen(null);
 
 }
 
@@ -1828,33 +1914,39 @@ function useMask(toggle){
             changeVolume(music_unmasked,1.0);
         }
         //hero just took off his mask, check if any guards can see him DO IT:
-        for(var i = 0; i < guards.length; i++){
-            var guard = guards[i];
-            if(guard.alive){
-                //check if guard sees hero:
-                if(!guard.being_choked_out && guard.doesSpriteSeeSprite(hero)){
-                    //guard will remember hero's face unless hero is masked:
-                    guard.knowsHerosFace = true;
-                    
-                    newMessage('A guard has seen you taking off your mask!');
-                    //alarm if hero is seen masked
-                    guard.seeAlarmingObject(hero);
-                    
-                    //show alert icon for this guard:
-                    set_latestAlert(guard);
-                    
-                    //rotate guard to face hero:
-                    guard.target_rotate = hero;
-                    
-                    //set lastSeen for investigating hero
-                    hero.setLastSeen(guard);
-                    guard.sawHeroLastAt = {x:hero.x,y:hero.y};
-             
-                    
-                }
+        checkUnmaskSeen(hero);
+
+    }
+}
+//A hero just pulled their mask off: any guard watching learns that face on the
+//spot and raises the alarm. Split out of useMask so the host can run it for a
+//remote player's mask coming off too.
+function checkUnmaskSeen(unmaskedHero){
+    for(var i = 0; i < guards.length; i++){
+        var guard = guards[i];
+        if(guard.alive){
+            //check if guard sees the unmasked hero:
+            if(!guard.being_choked_out && guard.doesSpriteSeeSprite(unmaskedHero)){
+                //guard will remember that player's face:
+                learnFace(guard, unmaskedHero);
+
+                newMessage(unmaskedHero === hero ? 'A guard has seen you taking off your mask!' : 'A guard has seen ' + (unmaskedHero.name || 'your partner') + ' taking off their mask!');
+                //alarm if hero is seen masked
+                guard.seeAlarmingObject(unmaskedHero);
+
+                //show alert icon for this guard:
+                set_latestAlert(guard);
+
+                //rotate guard to face hero:
+                guard.target_rotate = unmaskedHero;
+
+                //set lastSeen for investigating hero
+                unmaskedHero.setLastSeen(guard);
+                guard.sawHeroLastAt = {x:unmaskedHero.x,y:unmaskedHero.y};
+
+
             }
         }
-        
     }
 }
 function hero_is_dead(){
@@ -1933,16 +2025,15 @@ function explodeBomb(){
     bomb.sprite.visible = false;
     bomb_tooltip.visible = false;
     
-    //set last seen:
-    
-        alert_all_guards();
-        hero.lastSeenX = bomb.x;
-        hero.lastSeenY = bomb.y;
+    //set last seen: the blast is the alarming thing, guards converge on IT
+
+        alert_all_guards(bomb);
         hero_last_seen.x = bomb.x;
         hero_last_seen.y = bomb.y;
+        last_seen_active = true;
         //repath alert guards to hero
         notifyGuardsOfHeroLocation = true;
-    
+
     //destroy nearby walls:
     //Every cell in the blast radius takes a large `bomb` hit through the one damage entry
     //point (roadmap §6.2). damageCell decides per cell whether it breaks — it skips the
@@ -1984,9 +2075,11 @@ function explodeBomb(){
     //threw right here - which meant the hero was never checked against the blast below.
     //Restore the doodad once the art exists again.
 
-    if(get_distance(bomb.x,bomb.y,hero.x,hero.y)<bomb_radius){
-        killHero(bomb.x,bomb.y);
-
+    //the blast doesn't care which player is standing in it:
+    for(var bh = 0; bh < heroes.length; bh++){
+        if(heroes[bh].alive && get_distance(bomb.x,bomb.y,heroes[bh].x,heroes[bh].y)<bomb_radius){
+            killHero(heroes[bh],bomb.x,bomb.y);
+        }
     }
 }
 function plantBomb(){
@@ -2023,10 +2116,10 @@ function drop_gun(gun,x,y){
     }
     gun_drops.push(new jo_gun_drop(new PIXI.Sprite(image),display_effects,x,y,gun));
 }
-function killHero(fromX,fromY){
-    hero.kill(fromX,fromY);
+function killHero(heroUnit,fromX,fromY){
+    heroUnit.kill(fromX,fromY);
     //clear gun shot
-    hero.gun_shot_line.graphics.clear();
+    heroUnit.gun_shot_line.graphics.clear();
 }
 window.onresize = function (event){
     var w = window.innerWidth;
@@ -2098,6 +2191,6 @@ function getMapInfo(subdir, fileName){
 // `window`. It is an ES module now, so the functions below are republished as
 // globals for the not-yet-extracted code that still reads them by bare name.
 // See src/legacy-bridge.ts. Each extraction deletes another line from here.
-Object.assign(window, { getColor, windowSetup, fullscreen, drawBloodTrail, bakeBloodTrail, getUrlVars, removeAllChildren, clearStage, startMenu, startGame, setup_map, animate, reactionTimeout, gameloop_guards, gameloop_security_cams, removeBullet, gameloop_bullets, gameloop_doors, gameloop_dragtarget, gameloop_messages_and_tooltip, gameloop_getawaycar_and_loot, gameloop_alert_animation, pickUpGunDrop, gameloop, updateDebugInfo, newMessage, newFloatingMessage, updateMessage, spawn_backup, spawn_individual_backup, alert_all_guards, unsilenced_gun, setHeroImage, useMask, hero_is_dead, doGunShotEffects, set_latestAlert, setBomb, gameloop_bomb, explodeBomb, plantBomb, drop_gun, killHero, getMapInfo, heroSpawnPoint, spawnExtraHero });
+Object.assign(window, { getColor, windowSetup, fullscreen, drawBloodTrail, bakeBloodTrail, getUrlVars, removeAllChildren, clearStage, startMenu, startGame, setup_map, animate, reactionTimeout, gameloop_guards, gameloop_security_cams, removeBullet, gameloop_bullets, gameloop_doors, gameloop_dragtarget, gameloop_messages_and_tooltip, gameloop_getawaycar_and_loot, gameloop_alert_animation, pickUpGunDrop, gameloop, updateDebugInfo, newMessage, newFloatingMessage, updateMessage, spawn_backup, spawn_individual_backup, alert_all_guards, unsilenced_gun, setHeroImage, useMask, hero_is_dead, doGunShotEffects, set_latestAlert, setBomb, gameloop_bomb, explodeBomb, plantBomb, drop_gun, killHero, getMapInfo, heroSpawnPoint, spawnExtraHero, isHeroUnit, pickSeenHero, learnFace, checkUnmaskSeen, enterCar, exitCar });
 
 export {};

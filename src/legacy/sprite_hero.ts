@@ -22,6 +22,19 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
         this.plantingBomb = false;//true during the ~1.5s bomb-planting animation
         this.inCar = false;//true while driving the van (Phase 7). NOT suspicious by itself — a van is just a van.
         this.carry = null;
+        //Multiplayer (co-op): which player this hero belongs to and whether this
+        //machine is the one playing them. `hero` (the global) is always the local
+        //player's hero; every hero (local + remote) lives in `heroes`.
+        this.playerId = 0;
+        this.isLocal = false;
+        //What this hero is dragging (a corpse, or a guard being choked). Used to be
+        //the global `hero_drag_target`; per-hero now so two players can each drag.
+        this.drag_target = null;
+        //Downed-but-revivable (multiplayer): not dead, but out of the fight until a
+        //teammate finishes the revive channel. Single-player never sets this.
+        this.downed = false;
+        this.name = null;
+        this.nameTag = null;
         this.spyglass_distance = 64;
         this.spyglass_equipped = false;
         
@@ -61,7 +74,7 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
         //body. Simply sitting in / driving the van is deliberately NOT on this list — a
         //van is just a van until the hero does one of these things in or near it.
         this.willCauseAlert = function(){
-            if(this.masked || this.gunOut || this.inOffLimits || this.lockpicking || this.plantingBomb || this.carry !== null || hero_drag_target !== null)return true;
+            if(this.masked || this.gunOut || this.inOffLimits || this.lockpicking || this.plantingBomb || this.carry !== null || this.drag_target !== null)return true;
             else return false;
         }
         
@@ -102,6 +115,12 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
             this.sprite.position.x = this.x;
             this.sprite.position.y = this.y;
             this.sprite.rotation = this.rad;
+            //Name tag (teammates): parented to display_actors, NOT this.sprite —
+            //the sprite container rotates with the hero and would spin the text.
+            if(this.nameTag){
+                this.nameTag.position.x = this.x;
+                this.nameTag.position.y = this.y - 34;
+            }
             if(this.sprite_animate){
                 if(this.gunOut){
                   // Shoulders don't sway when you have a gun out
@@ -144,6 +163,8 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
                             this.lastSeenY = observer.sawHeroLastAt.y;
                             hero_last_seen.x = observer.sawHeroLastAt.x;
                             hero_last_seen.y = observer.sawHeroLastAt.y;
+                            //the squad has one shared "last seen" marker, whichever hero it was
+                            window.last_seen_active = true;
                             //repath alert guards to hero
                             notifyGuardsOfHeroLocation = true;
                             //newMessage("Last seen " + observer.sawHeroLastAt.x + "," + observer.sawHeroLastAt.y);
@@ -157,12 +178,14 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
                     this.lastSeenY = this.y;
                     hero_last_seen.x = this.x;
                     hero_last_seen.y = this.y;
+                    //the squad has one shared "last seen" marker, whichever hero it was
+                    window.last_seen_active = true;
                     //repath alert guards to hero
                     notifyGuardsOfHeroLocation = true;
                     //newMessage("Last seen " + this.x + "," + this.y);
                 }
             }
-            
+
         }
         this.changeGun = function(index){
             if(this.gun_index === index)return;
@@ -176,7 +199,7 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
             if(this.ability_body_armor){
                 var chance = randomFloatFromInterval(0,1);
                 if(chance >=.5){
-                    newFloatingMessage("Close Call!",{x:hero.x,y:hero.y},"#FFaa00");
+                    newFloatingMessage("Close Call!",{x:this.x,y:this.y},"#FFaa00");
                     return;
                 }
             }
@@ -184,11 +207,6 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
             if(this.health <= 0)this.kill(fromX,fromY);
         }
         this.kill = function(fromX,fromY){
-            hero_is_dead();
-            
-            //clear laser sight
-            // this.gun_shot_line.graphics.clear();
-        
             //display_actors.removeChild(this.sprite_head);
             this.alive = false;
             //enable moving so they can be dragged
@@ -197,22 +215,26 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
             physics.removeActor(this);
             this.path = [];
             this.target = {x: null, y:null};
-            
+
             this.sprite_body.texture = (img_hero_dead);
             this.sprite.removeChild(this.sprite_head);
-            
-            messageGameOver.text = ('Press [Esc] to restart!');
-            
-            //remove key handlers so hero can no longer move around
-            removeHandlers(true);//don't remove key handlers when you die (only mouse stuff)
-            //add to stats:
-            jo_store_inc("loses");
-            
-            
-            var splatter_angle = grid.angleBetweenPoints(fromX,fromY,hero.x,hero.y);
-            bloodParticleSplatter(splatter_angle,hero);
-            
-            
+
+            //The local player's death is also a UI moment (music, the restart hint,
+            //dead controls, the loss tally). A teammate's death on this machine is
+            //only the world change above.
+            if(this === window.hero){
+                hero_is_dead();
+                messageGameOver.text = ('Press [Esc] to restart!');
+                //remove key handlers so hero can no longer move around
+                removeHandlers(true);//don't remove key handlers when you die (only mouse stuff)
+                //add to stats:
+                jo_store_inc("loses");
+            }
+
+            var splatter_angle = grid.angleBetweenPoints(fromX,fromY,this.x,this.y);
+            bloodParticleSplatter(splatter_angle,this);
+
+
             //addButton("menu.png","menu2.png",startMenu);
         }
 
@@ -231,7 +253,22 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
             var C = Math.sqrt(A*A+B*B);
             a = c*A/C;
             b = c*B/C;
-            return {x:hero.x+a,y:hero.y+b};
+            return {x:this.x+a,y:this.y+b};
+        }
+
+        //Floating name tag for teammates (multiplayer). Lives in display_actors so
+        //it doesn't rotate with the hero sprite; positioned by prepare_for_draw.
+        this.setName = function(name){
+            this.name = name;
+            if(!name)return;
+            if(!this.nameTag){
+                this.nameTag = new PIXI.Text(name, {font: 'bold 13px Arial', fill: '#ffffff', stroke: '#000000', strokeThickness: 3});
+                this.nameTag.anchor.x = 0.5;
+                this.nameTag.anchor.y = 1;
+                display_actors.addChild(this.nameTag);
+            }else{
+                this.nameTag.text = name;
+            }
         }
 
         
