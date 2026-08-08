@@ -133,6 +133,25 @@ class Physics {
     this.impl.setVelocity(owner, 0, 0);
   }
 
+  /** Set an actor's velocity outright, in pixels/second — used to launch a body on a hit. */
+  setVelocity(owner: ActorOwner, vxPx: number, vyPx: number): void {
+    this.impl.setVelocity(owner, vxPx, vyPx);
+  }
+
+  /** An actor's current velocity, in pixels/second. */
+  getVelocity(owner: ActorOwner): { x: number; y: number } {
+    return this.impl.getVelocity(owner);
+  }
+
+  /**
+   * Multiply an actor's velocity by `factor` (0..1) — one step of the exponential decay a
+   * knocked-back guard skids to a halt under while the AI is holding off (roadmap follow-up).
+   */
+  scaleVelocity(owner: ActorOwner, factor: number): void {
+    const v = this.impl.getVelocity(owner);
+    this.impl.setVelocity(owner, v.x * factor, v.y * factor);
+  }
+
   teleport(owner: ActorOwner, x: number, y: number): void {
     this.impl.teleport(owner, x, y);
   }
@@ -201,6 +220,23 @@ class Physics {
   /** Everyone standing in a door's proximity sensor — replaces the doors x guards loop. */
   openersNear(cell: number): ReadonlySet<ActorOwner> {
     return this.impl.openersNear(cell);
+  }
+
+  // --- smoke (roadmap §8.2, Phase 8) ----------------------------------------
+
+  /**
+   * Deploy a smoke cloud from a set of pixel-space circles `{x, y, r}`. The circles are
+   * `VISION_BLOCKER` sensors: they stop guard/camera sight and gunfire without pushing
+   * anyone. Returns a handle to pass to `removeVisionBlocker`.
+   */
+  addVisionBlocker(circles: ReadonlyArray<{ x: number; y: number; r: number }>): number {
+    if (!this.built) return -1;
+    return this.impl.addVisionBlocker(circles);
+  }
+
+  removeVisionBlocker(id: number): void {
+    if (id < 0) return;
+    this.impl.removeVisionBlocker(id);
   }
 
   // --- queries --------------------------------------------------------------

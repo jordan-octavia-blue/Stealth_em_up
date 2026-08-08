@@ -68,3 +68,50 @@ describe('DAMAGE_AMOUNT', () => {
     expect(DAMAGE_AMOUNT.bullet).toBeLessThan(tileDef(3)?.hp ?? 0);
   });
 });
+
+describe('doors are weak wood a shotgun can open', () => {
+  it('gives the two door tile codes the wood material', () => {
+    expect(tileDef(5)?.material).toBe('wood');
+    expect(tileDef(6)?.material).toBe('wood');
+  });
+
+  it('makes a door significantly weaker than a brick wall', () => {
+    expect(tileDef(5)?.hp ?? Infinity).toBeLessThan(tileDef(1)?.hp ?? 0);
+  });
+
+  it('lets gunfire splinter wood, unlike masonry', () => {
+    expect(materialTakesDamage('wood', 'bullet')).toBe(true);
+    expect(materialTakesDamage('brick', 'bullet')).toBe(false);
+  });
+
+  it('opens the door with a single near point-blank shotgun blast', () => {
+    // gun_shotgun fires 8 pellets; near point-blank most connect. The door must fall to a
+    // blast of only ~6 pellets so a close shot reliably breaches it.
+    const doorHp = tileDef(5)?.hp ?? Infinity;
+    const pelletsThatConnect = 6;
+    expect(pelletsThatConnect * DAMAGE_AMOUNT.bullet).toBeGreaterThanOrEqual(doorHp);
+  });
+});
+
+describe('glass walls: shootable, not walkable, breakable', () => {
+  it('is a glass-material cell with hit points', () => {
+    expect(tileDef(7)?.material).toBe('glass');
+    expect(tileDef(7)?.hp ?? 0).toBeGreaterThan(0);
+  });
+
+  it('does not block vision (so it can be seen and shot through)', () => {
+    expect(tileDef(7)?.blocksVision).toBe(false);
+  });
+
+  it('takes damage from every source short of being indestructible', () => {
+    expect(materialTakesDamage('glass', 'bullet')).toBe(true);
+    expect(materialTakesDamage('glass', 'bomb')).toBe(true);
+    expect(materialTakesDamage('glass', 'frag')).toBe(true);
+    expect(materialTakesDamage('glass', 'car')).toBe(true);
+  });
+
+  it('breaks into a plain floor (rubbleTile) once shattered', () => {
+    // rubbleTile 2 is the white floor code the destroy pipeline swaps in.
+    expect(tileDef(7)?.rubbleTile).toBe(2);
+  });
+});

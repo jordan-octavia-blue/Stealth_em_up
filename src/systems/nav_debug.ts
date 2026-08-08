@@ -2,7 +2,7 @@
  * Navigation debug overlay (roadmap §10.4 — "debug overlays are part of each system's
  * deliverable, not an afterthought").
  *
- * Press **N** in game to cycle: off -> paths -> regions -> danger -> flow field.
+ * Press **N** in game to cycle: off -> paths -> mesh -> regions -> danger -> flow field.
  *
  * Like the other extracted systems this one still reads shared world state (`camera`,
  * `guards`, the display containers) as window globals; the nav data it draws comes from
@@ -13,7 +13,7 @@ import { nav } from '../nav';
 import { DIR_X, DIR_Y } from '../nav/navgrid';
 import { peakDanger } from '../nav/danger';
 
-export const NAV_DEBUG_MODES = ['off', 'paths', 'regions', 'danger', 'flow'] as const;
+export const NAV_DEBUG_MODES = ['off', 'paths', 'mesh', 'regions', 'danger', 'flow'] as const;
 export type NavDebugMode = (typeof NAV_DEBUG_MODES)[number];
 
 let mode = 0;
@@ -64,16 +64,43 @@ export function drawNavDebug(): void {
   const grid = nav.navGrid;
   const cs = grid.cellSize;
 
+  if (currentNavDebugMode() === 'mesh') {
+    // What nav actually believes the map is: solid vs walkable. Drawn bold and opaque so it
+    // reads over the fog-of-war shading — solid cells filled red, walkable cells a green
+    // grid — which is what makes "a path crossing a wall" obvious at a glance (a green path
+    // line over a red cell) and tells a wall apart from a walkable cell nav wrongly opened.
+    for (let i = 0; i < grid.size; i++) {
+      const p = camera.relativePoint({ x: grid.cellX(i) * cs, y: grid.cellY(i) * cs });
+      if (grid.walkable[i] === 1) {
+        g.lineStyle(1, 0x00ff88, 0.55);
+        g.beginFill(0x00ff88, 0.06);
+        g.drawRect(p.x, p.y, cs, cs);
+        g.endFill();
+      } else {
+        g.lineStyle(2, 0xff3366, 0.95);
+        g.beginFill(0xff1133, 0.4);
+        g.drawRect(p.x + 1, p.y + 1, cs - 2, cs - 2);
+        g.endFill();
+      }
+    }
+    g.lineStyle(0, 0, 0);
+    return;
+  }
+
   if (currentNavDebugMode() === 'regions') {
     const regions = nav.regions;
     for (let i = 0; i < grid.size; i++) {
       const label = regions.labelAt(i);
       if (label === -1) continue;
       const p = camera.relativePoint({ x: grid.cellX(i) * cs, y: grid.cellY(i) * cs });
-      g.beginFill(REGION_COLORS[label % REGION_COLORS.length], 0.28);
+      // Opaque enough to read over the fog shading, with a matching outline so cell edges
+      // stay crisp instead of blurring into one wash of colour.
+      g.lineStyle(1, REGION_COLORS[label % REGION_COLORS.length], 0.9);
+      g.beginFill(REGION_COLORS[label % REGION_COLORS.length], 0.5);
       g.drawRect(p.x, p.y, cs, cs);
       g.endFill();
     }
+    g.lineStyle(0, 0, 0);
     return;
   }
 
@@ -118,26 +145,40 @@ export function drawNavDebug(): void {
     return;
   }
 
-  // paths: every living guard's remaining waypoints, plus the leg it is walking now
+  // paths: every living guard's remaining waypoints, plus the leg it is walking now.
+  //
+  // The first leg (unit -> current target) is drawn thick amber and the rest bright green,
+  // because that first leg is the only one anchored on the unit's live position and so the
+  // only one that can cross a wall — calling it out makes the failure mode legible.
   const waypoints: Array<{ x: number; y: number }> = [];
-  g.lineStyle(2, 0x00ff88, 0.9);
+  // Waypoint-to-waypoint legs first (green).
   for (let i = 0; i < guards.length; i++) {
     const guard = guards[i];
-    if (!guard.alive) continue;
-    const from = camera.relativePoint({ x: guard.x, y: guard.y });
-    g.moveTo(from.x, from.y);
-    if (guard.target && guard.target.x != null) {
-      const target = camera.relativePoint(guard.target);
-      g.lineTo(target.x, target.y);
-      waypoints.push(target);
-    }
+    if (!guard.alive || !guard.target || guard.target.x == null) continue;
+    g.lineStyle(2, 0x00ff88, 0.9);
+    const target = camera.relativePoint(guard.target);
+    g.moveTo(target.x, target.y);
+    waypoints.push(target);
     for (let p = 0; p < guard.path.length; p++) {
       const next = camera.relativePoint(guard.path[p]);
       g.lineTo(next.x, next.y);
       waypoints.push(next);
     }
   }
+  // The unit -> target first leg on top, thick amber, so a wall crossing here stands out.
+  for (let i = 0; i < guards.length; i++) {
+    const guard = guards[i];
+    if (!guard.alive || !guard.target || guard.target.x == null) continue;
+    g.lineStyle(4, 0xffb300, 0.95);
+    const from = camera.relativePoint({ x: guard.x, y: guard.y });
+    const target = camera.relativePoint(guard.target);
+    g.moveTo(from.x, from.y);
+    g.lineTo(target.x, target.y);
+  }
   // Waypoint dots come last: in Pixi v3 drawCircle ends the current path, so a lineTo
   // after one throws.
+  g.lineStyle(0, 0, 0);
+  g.beginFill(0x00ff88, 0.9);
   for (const point of waypoints) g.drawCircle(point.x, point.y, 3);
+  g.endFill();
 }

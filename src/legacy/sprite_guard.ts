@@ -3,8 +3,8 @@ Copyright 2014,2015, Jordan O'Leary, All rights reserved.
 If you would like to copy or use my code, you may contact
 me at jdoleary@gmail.com
 /*******************************************************/
+import { squad } from '../ai/squad';
 import { gameClock } from '../core/clock';
-import { events } from '../core/events';
 import { nav, PathPriority } from '../nav';
 import { physics } from '../physics';
 function sprite_guard_wrapper(pixiSprite, hasRiotShield){
@@ -17,6 +17,10 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         //gameClock time (ms) until which this guard is diving clear of the van (Phase 7).
         //While it holds, the guard ignores its normal AI and runs to `target`.
         this.dodgeUntil = 0;
+        //gameClock time (ms) until which this guard is stunned from being run into by a
+        //sprinting hero (src/systems/melee.ts). While it holds, the guard skips its AI and
+        //coasts on the decaying knockback velocity instead of steering.
+        this.stunnedUntil = 0;
         this.blood_trail;
         this.blood_trail_size = 10;
         this.blood_trail_skip_frequency = 1.5;
@@ -53,6 +57,14 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         this.stuckSince = 0;//gameClock time the guard stopped making progress, 0 = moving
         this.stuckFromX = 0;
         this.stuckFromY = 0;
+
+        //Phase 6b squad coordination (src/ai/squad.ts). The blackboard writes these:
+        //`assignedEntry` is the nav cell of the doorway/gap this guard is told to approach
+        //(null = converge directly / patrol); the patrol fields track which named route
+        //(if the map has any) this guard walks and how far along it is.
+        this.assignedEntry = null;
+        this.patrolRouteIndex = -1;
+        this.patrolLeg = 0;
 
         //Add all sprites to sprite container
         this.feet_clip = jo_movie_clip("movie_clips/","feet_",8,".png")
@@ -107,9 +119,12 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
             nav.cancelRequest(this);
             //Wherever guards die is dangerous: the nav danger layer decays over ~8s and
             //is summed into path costs, so the squad stops filing into the same doorway
-            //one at a time. Phase 6's squad logic scales these deposits by what each
-            //guard actually witnessed.
-            events.emit('nav:danger', {x: this.x, y: this.y, amount: 6, radius: 2});
+            //one at a time. Phase 6b's squad logic scales this deposit by how many living
+            //guards saw the death and whether it landed at a chokepoint, then routes the
+            //survivors around it. reportDeath must run before removeGuard so the dead
+            //guard's squadmates are still counted as witnesses.
+            squad.reportDeath(this, gameClock.now());
+            squad.removeGuard(this);
             alarmingObjects.push(this);//add body to alarming objects so if it is see they will sound alarm
             
             
@@ -136,6 +151,10 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         this.getRandomPatrolPath = function(){
             //queue a patrol path. The search itself runs inside nav, under the
             //scheduler's per-frame budget — this call never performs one.
+
+            //Phase 6b: if the map defines named patrol routes, walk the one assigned to this
+            //guard instead of wandering. Falls through to region-safe random wander otherwise.
+            if(squad.patrolPathFor(this))return;
 
             //game time, not wall time: the backoff must not burn down while paused
             var now = gameClock.now();

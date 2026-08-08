@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { findPath } from '../../src/nav/astar';
 import { isCorridorWalkable, isSegmentWalkable, smoothPath } from '../../src/nav/smooth';
 import { center, gridFromAscii } from './helpers';
 
@@ -143,5 +144,38 @@ describe('smoothPath', () => {
     const grid = gridFromAscii(['...']);
     expect(smoothPath(grid, [], 19)).toEqual([]);
     expect(smoothPath(grid, [1], 19)).toEqual([]);
+  });
+
+  it('never hands a body-clipping first leg from an off-centre start', () => {
+    // A unit pressed off-centre against a wall (physics packs bodies into geometry) is the
+    // only leg that starts somewhere other than a cell centre. The straight hop from there
+    // to the first cell centre can clip a corner the grid path was routed around — the
+    // "path through a wall" that leaves a guard grinding along it. The smoother must lead
+    // with the unit's own cell centre in that case.
+    const grid = gridFromAscii([
+      '....',
+      '##..',
+      '.#.#',
+      '#..#',
+      '..#.',
+    ]);
+    const startCell = grid.index(2, 3);
+    const { path } = findPath(grid, startCell, grid.index(0, 4));
+    // Guard standing toward the bottom-left of its cell, body still clear of the walls.
+    const start = { x: 142, y: 238 };
+
+    // Precondition: the naive straight hop to the first cell centre is NOT body-clear.
+    const firstCentre = center(grid, grid.cellX(path[1]), grid.cellY(path[1]));
+    expect(isCorridorWalkable(grid, start, firstCentre, 19)).toBe(false);
+
+    const smoothed = smoothPath(grid, path, 19, start);
+    // It leads with the unit's own cell centre, which is reachable, and every leg from the
+    // real start onward is clear for the whole body.
+    expect(smoothed[0]).toEqual(center(grid, 2, 3));
+    let from = start;
+    for (const point of smoothed) {
+      expect(isCorridorWalkable(grid, from, point, 19)).toBe(true);
+      from = point;
+    }
   });
 });

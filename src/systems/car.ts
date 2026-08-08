@@ -96,6 +96,15 @@ const NOISE_INTERVAL_MS = 700;
 /** ...and only while actually moving. */
 const NOISE_MIN_SPEED_PX = 60;
 
+/**
+ * How long the driver stays "suspicious" after the van does something violent — ramming a
+ * wall or running a guard over. During the window `hero.willCauseAlert()` is true, so any
+ * guard or camera that sees the van alarms (and, if the driver is unmasked, learns their
+ * face) through the normal detection path. Long enough that a guard who turns toward the
+ * crash a beat later still catches it; short enough that calmly driving on clears it.
+ */
+const VAN_SUSPICION_MS = 2500;
+
 /** Camera in car mode: zoom out and lead the car by its velocity. */
 const CAR_ZOOM_OUT = 1 / 1.3;
 const CAR_LOOKAHEAD_S = 0.5;
@@ -596,6 +605,11 @@ function resolveCarContacts(st: { vx: number; vy: number; speed: number } | null
       const unit = c.owner as any;
       if (unit.alive && driving >= RUN_OVER_SPEED_PX) runOver(unit, motion);
     } else if (c.kind === 'cell' && c.cell >= 0 && c.speed >= BREACH_SPEED_PX) {
+      // A hard hit on a wall is a suspicious act whether or not the wall gives: ramming
+      // concrete that shrugs it off is just as much a scene as smashing through drywall.
+      // Only while a driver is at the wheel — a bystander shoving the parked van isn't
+      // the hero's crime.
+      if (driver) driver.markVanSuspicious(VAN_SUSPICION_MS);
       // damageCell filters by material: drywall and brick take car damage, concrete and
       // steel (and the map border) shrug it off. The amount is capped low (see
       // BREACH_DAMAGE_MAX) so one impact damages a solid wall but never destroys it.
@@ -609,6 +623,10 @@ function resolveCarContacts(st: { vx: number; vy: number; speed: number } | null
 function runOver(guard: any, st: { vx: number; vy: number; speed: number } | null): void {
   const dirX = st && st.speed > 0 ? st.vx / st.speed : 0;
   const dirY = st && st.speed > 0 ? st.vy / st.speed : 0;
+  // Mowing a guard down is a suspicious act: any other guard or camera that sees the van
+  // during the window alarms (and, unmasked, learns the driver's face). The fresh corpse
+  // is its own alarm source too, but this makes the deed itself count, not just the body.
+  if (driver) driver.markVanSuspicious(VAN_SUSPICION_MS);
   bloodParticleSplatter(Math.atan2(dirY, dirX), guard);
   guard.kill();
   knockbacks.push({

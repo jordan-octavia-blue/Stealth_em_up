@@ -18,6 +18,7 @@ import { cycleBreachDebug } from './breach_debug';
 import { physics } from '../physics';
 import { isInCar, toggleCar } from './car';
 import { mpAction, isClient as netIsClient } from './mp';
+import { throwGrenade } from './grenades';
 
 //The world-mutations in this file run locally for instant feel (single-player and
 //host: that IS the authoritative run; client: optimistic, self-healed by
@@ -96,6 +97,11 @@ export function addKeyHandlers(){
                 }
                 keys['g'] = true;
             }
+            //Grenades (Phase 8): 3 = frag, 4 = smoke, 5 = flash. Each throws toward the
+            //current mouse world position (window.mouse). Debounced so one press = one throw.
+            if(code == 51){ if(!keys['3'] && typeof mouse !== 'undefined' && mouse)throwGrenade('frag', mouse); keys['3'] = true; }
+            if(code == 52){ if(!keys['4'] && typeof mouse !== 'undefined' && mouse)throwGrenade('smoke', mouse); keys['4'] = true; }
+            if(code == 53){ if(!keys['5'] && typeof mouse !== 'undefined' && mouse)throwGrenade('flash', mouse); keys['5'] = true; }
             /*if(code == 80){
                 //'p'
                 pause = !pause;
@@ -371,6 +377,9 @@ export function addKeyHandlers(){
         if(code == 78){keys['n'] = false;}
         if(code == 66){keys['b'] = false;}
         if(code == 72){keys['h'] = false;}
+        if(code == 51){keys['3'] = false;}
+        if(code == 52){keys['4'] = false;}
+        if(code == 53){keys['5'] = false;}
         if(code == 86){
             //on release of key only
             //if(keys['v'])circProgBar.stop();//stop putting on mask

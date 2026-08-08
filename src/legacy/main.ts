@@ -3,6 +3,7 @@ Copyright 2014,2015, Jordan O'Leary, All rights reserved.
 If you would like to copy or use my code, you may contact
 me at jdoleary@gmail.com
 /*******************************************************/
+import { squad } from '../ai/squad';
 import { gameClock } from '../core/clock';
 import { events } from '../core/events';
 import { mouseMove, addKeyHandlers, removeHandlers } from '../systems/input';
@@ -29,6 +30,8 @@ import {
 import { loadMap } from '../map/loader';
 import { DAMAGE_AMOUNT } from '../map/tileset';
 import { mpApplyIncoming, mpCollectOutgoing, isHost as mpIsHost, isClient as mpIsClient, isMultiplayer as mpIsMultiplayer, mpAction } from '../systems/mp';
+import { updateGrenades, resetGrenades } from '../systems/grenades';
+import { sprintKnockback, tickStunned } from '../systems/melee';
 // Side-effect import: wires the breach FX + AI listeners onto `cell:destroyed` (roadmap
 // §6.2 pipeline steps 6-7). No exported symbols; importing it once is the whole point.
 import '../systems/breach';
@@ -363,9 +366,17 @@ function clearStage(){
     //references to guards from the game being torn down, every body in the world belongs
     //to a sprite that is about to be dropped, and the debug overlays' Graphics are about
     //to be removed with their container.
+    //Drop squad state (guard references, hero belief) and unsubscribe its breach listener with
+    //the run it belongs to; do it before nav.reset() so it can undo its door-cost spikes while
+    //the grid is still current.
+    squad.reset();
     nav.reset();
     physics.reset();
     resetCarSystem();
+    //Grenades (Phase 8): drop any in-flight throwables and tear down active smoke clouds
+    //before physics.reset()/the new grid arrive, so no stale vision-blocker or cell flag
+    //survives into the next run.
+    resetGrenades();
     hasWon = false;
     hasLost = false;
     resetNavDebug();
@@ -626,6 +637,15 @@ function setup_map(map){
     //opening a wall) reach nav through the `nav:dirty` event.
     nav.build(grid);
 
+    //Squad coordination (roadmap §5.3 / Phase 6b). One blackboard shared by every guard:
+    //fused hero belief, entry-point assignment across a room's doors + breach gaps, and
+    //kill-box danger routing. build() clears any prior run's state. Breach gaps register
+    //themselves later via the `cell:breached` event. `witnessSee` lets it count how many
+    //living guards actually saw a death (real occlusion) without this module importing physics.
+    squad.witnessSee = function(x0,y0,x1,y1){ return physics.canSee(x0,y0,x1,y1); };
+    squad.build(nav.navGrid, grid.door_sprites.map(function(ds){ return ds.relatedDoorWall.cellIndex(); }));
+    squad.setPatrolRoutes(map.patrolRoutes || []);
+
     //Static collision geometry (roadmap §3.2): one body for the map with a 2 m box
     //fixture per solid cell. Built before anything that seals a tile under itself (the
     //van, the security computer) — those go through `grid.makeWallSolid`, which reaches
@@ -649,6 +669,7 @@ function setup_map(map){
 
     display_tiles_walls.addChild(tile_containers[0]);//add ParticleContaineres, black walls
     display_tiles_walls.addChild(tile_containers[2]);//add ParticleContaineres, brown furnature
+    display_tiles_walls.addChild(tile_containers[5]);//glass walls (translucent, drawn above the floor with the other walls)
     display_tiles.addChild(tile_containers[1]);//add ParticleContaineres
     display_tiles.addChild(tile_containers[3]);//add ParticleContaineres
     display_tiles.addChild(tile_containers[4]);//add ParticleContaineres
@@ -710,6 +731,7 @@ function setup_map(map){
                     guard_inst.x = map.objects.guards[i][0];
                     guard_inst.y = map.objects.guards[i][1];
                     physics.addGuard(guard_inst, guard_inst.radius);
+                    squad.addGuard(guard_inst);
                     guard_inst.getRandomPatrolPath();
                     guards.push(guard_inst);
                 }
@@ -907,16 +929,67 @@ function gameloop_guard_visibility(deltaTime){
         }
     }
 }
+//Draw/update/remove the "dazed" marker over a flashbanged guard (Phase 8): three little
+//stars orbiting the guard's head while its `blindUntil` is in the future. Created lazily on
+//the guard as `blindFx`, positioned each frame, and torn down the moment the blind ends (or
+//the guard dies) so nothing lingers.
+function updateGuardBlindFx(guard){
+    var blinded = guard.alive && guard.blindUntil && gameClock.now() < guard.blindUntil;
+    if(blinded){
+        if(!guard.blindFx){
+            guard.blindFx = new PIXI.Graphics();
+            guard.blindFxAngle = 0;
+            display_effects.addChild(guard.blindFx);
+        }
+        guard.blindFxAngle += 0.18;
+        var g = guard.blindFx;
+        g.clear();
+        var R = 20;
+        for(var k = 0; k < 3; k++){
+            var a = guard.blindFxAngle + k*(Math.PI*2/3);
+            g.beginFill(0xffee44, 0.95);
+            //a vertically-squashed orbit reads as "stars circling the head" from top-down
+            g.drawCircle(Math.cos(a)*R, Math.sin(a)*R*0.5, 4);
+            g.endFill();
+        }
+        g.x = guard.x;
+        g.y = guard.y - 26;
+    }else if(guard.blindFx){
+        if(guard.blindFx.parent)guard.blindFx.parent.removeChild(guard.blindFx);
+        guard.blindFx = null;
+    }
+}
 //Guard AI: perception, alarm, combat, patrol. HOST ONLY in multiplayer — clients
 //receive guard state in snapshots and never run this.
 function gameloop_guards(deltaTime){
     for(var i = 0; i < guards.length; i++){
         var guard = guards[i];
+        //Flashbanged (Phase 8): a guard blinded by a flash is dazed. It can't see, so it
+        //stops where it stands until the blind wears off, and shows a spinning "stars"
+        //marker so the player can tell it's been taken out of the fight. This runs for dead
+        //guards too, only to clear a marker on one killed mid-blind.
+        updateGuardBlindFx(guard);
         if(guard.alive){
+            //A blinded guard freezes: skip its whole AI/movement for this frame and keep its
+            //body still. We must NOT clear guard.moving here — a patrolling guard uses that
+            //flag to ask for its next route, so zeroing it would strand the guard once the
+            //blind ended. Stopping the physics body each frame is enough to hold it in place.
+            if(guard.blindUntil && gameClock.now() < guard.blindUntil){
+                if(physics.hasActor(guard))physics.stop(guard);
+                continue;
+            }
             //Dodging the van (Phase 7): for the ~0.5s override, the guard ignores its normal
             //AI and just scrambles toward the sidestep target the car system set.
             if(guard.dodgeUntil && gameClock.now() < guard.dodgeUntil){
                 guard.move_to_target();
+                continue;
+            }
+
+            //Stunned by a sprinting hero running into them (src/systems/melee.ts): the
+            //guard is out for a beat — no perception, no aiming, no pathing. tickStunned
+            //bleeds off the launch velocity so the body skids back and settles; skipping the
+            //rest of the turn is what stops move_to_target from overwriting that velocity.
+            if(tickStunned(guard)){
                 continue;
             }
 
@@ -968,6 +1041,8 @@ function gameloop_guards(deltaTime){
                     //set lastSeen for investigating hero
                     seen.setLastSeen(guard);
                     guard.sawHeroLastAt = {x:seen.x,y:seen.y};
+                    //Phase 6b: fuse this sighting into the one shared squad belief.
+                    squad.updateBelief(seen.x, seen.y, gameClock.now());
                 }else{
                     //guard doesn't see hero so set target_rotate to null so guard can rotate where he moves again
                     guard.target_rotate = null;
@@ -1014,22 +1089,31 @@ function gameloop_guards(deltaTime){
                         //set lastSeen for investigating hero
                         engaged.setLastSeen(guard);
                         guard.sawHeroLastAt = {x:engaged.x,y:engaged.y};
+                        //Phase 6b: fuse this sighting into the one shared squad belief.
+                        squad.updateBelief(engaged.x, engaged.y, gameClock.now());
                     }
                 }else{
-
-                    //if guard is alarmed rotate to the next waypoint so they peer around corners.
-                    //~guard doesn't see hero so set target_rotate to null so guard can rotate where he moves again
-                    //don't change rotation unless the guard is close to the point (this keeps them from walking backwards [bug])
+                    
+                    //Alarmed but the hero is out of sight: the guard should face where it
+                    //is walking. When the next waypoint is close it faces that, so guards
+                    //peer around the corner they are about to turn; otherwise clear
+                    //target_rotate so move_to_target() rotates toward the current heading.
+                    //Clearing it matters: without it target_rotate keeps its last value —
+                    //usually the hero reference from when the guard last had eyes on — so an
+                    //alarmed guard would strafe toward the hero's live position instead of
+                    //looking the way it moves. (The 100px guard keeps a waypoint that is
+                    //beside or behind the guard from making it appear to walk backwards.)
                     if(guard.path[0] && get_distance(guard.x,guard.y,guard.path[0].x,guard.path[0].y) < 100)guard.target_rotate = guard.path[0];
-
-                    //if alarmed move to the last place ANY hero was seen (squad-level marker)
-                    if(notifyGuardsOfHeroLocation || !guard.chasingHero && last_seen_active){
-                        //this is only called once due to .chasingHero
-                        //repath to hero pos
-                        guard.moving = true;
-                        guard.pathToCoords(hero_last_seen.x,hero_last_seen.y);
-                        guard.chasingHero = true;
-                    }
+                    else guard.target_rotate = null;
+                
+                    //if alarmed and the hero is out of sight, hand movement to the squad
+                    //blackboard (Phase 6b). It steers this guard toward the shared hero belief:
+                    //a guard already in the hero's room converges directly (shared flow field),
+                    //while a guard in another room approaches its assigned doorway/gap by its own
+                    //A* — so the squad fans out across the entrances and routes around kill boxes
+                    //instead of filing through one door. Replaces the old "everyone paths to the
+                    //same last-known point" block.
+                    squad.steerAlarmed(guard, gameClock.now());
                 }
             }
             //if guard has a path
@@ -1069,6 +1153,23 @@ function gameloop_guards(deltaTime){
                 guard.idling = true;*/
                 
             }
+            //The straight line to the current waypoint is only guaranteed wall-clear from
+            //the spot the route was planned at. By the time the guard follows its first leg
+            //it can be elsewhere: a path search resolves a few fixed steps after it was
+            //requested, a route replaced mid-leg leaves a stale target behind, or the
+            //physics solver shoves the body off the planned line. Steering blindly then
+            //drives the guard's "next point" line straight through a wall (always the first
+            //leg — the waypoint-to-waypoint legs are cell-centre to cell-centre and stay
+            //clear). If the leg from where the guard actually is to its target isn't clear
+            //for its body, drop the route so a fresh one is planned from here; smoothPath
+            //clearance-checks the new first leg against this position.
+            if(nav.ready && guard.moving && guard.target.x != null &&
+               !nav.isDirectPathClear({x:guard.x,y:guard.y}, guard.target, guard.radius)){
+                guard.target.x = null;
+                guard.target.y = null;
+                guard.path = [];
+                guard.chasingHero = false;
+            }
             //call move to target, if target is reached, it will return true and set target to null
             if(guard.move_to_target()){
                 guard.target.x = null;
@@ -1097,8 +1198,9 @@ function gameloop_security_cams(deltaTime){
         var cam = security_cameras[i];
         
         if(mpIsHost() && !cameras_disabled && cam.alive){
-            cam.swivel(deltaTime);
-
+            //A flashbanged camera stops swivelling while it's blinded (Phase 8) — it can't
+            //see anyway, and a frozen camera reads as "knocked out" the way a frozen guard does.
+            if(!(cam.blindUntil && gameClock.now() < cam.blindUntil))cam.swivel(deltaTime);
 
             //if security_cameras are not already alarmed
             if(!cam.alarmed){
@@ -1123,6 +1225,8 @@ function gameloop_security_cams(deltaTime){
                     set_latestAlert(cam);
                     //set lastSeen for investigating hero — cameras broadcast immediately
                     camSeen.setLastSeen(null);
+                    //Phase 6b: a camera sighting feeds the shared squad belief too.
+                    squad.updateBelief(camSeen.x, camSeen.y, gameClock.now());
                 }
             }else{
                 //if camera is already alarmed, keep updating the position of any
@@ -1132,6 +1236,8 @@ function gameloop_security_cams(deltaTime){
                     set_latestAlert(cam);
                     //set lastSeen for investigating hero
                     camTracked.setLastSeen(null);
+                    //Phase 6b: a camera sighting feeds the shared squad belief too.
+                    squad.updateBelief(camTracked.x, camTracked.y, gameClock.now());
                 }
             }
             
@@ -1166,6 +1272,31 @@ function removeBullet(index){
     display_actors.removeChild(bullet.sprite);
     bullets.splice(index,1);
 }
+//Glass lets bullets pass straight through (its cells carry no VISION_BLOCKER bit, so the
+//bullet raycast never stops on them) — but the shot still chips the pane on its way past,
+//so enough rounds shatter it into a walkable gap. Walk the segment the bullet covered this
+//step in half-cell steps and damage each glass cell once per bullet (bullet.glassHit guards
+//against a slow bullet sitting in one cell over several steps).
+function damageGlassInBulletPath(bullet, x0, y0, x1, y1){
+    if(!grid)return;
+    var dx = x1-x0, dy = y1-y0;
+    var len = Math.sqrt(dx*dx+dy*dy);
+    if(len === 0)return;
+    var steps = Math.max(1, Math.ceil(len/(grid.cell_size/2)));
+    if(!bullet.glassHit)bullet.glassHit = {};
+    for(var s = 0; s <= steps; s++){
+        var t = s/steps;
+        var gi = grid.getIndexFromCoords_2d(x0+dx*t, y0+dy*t);
+        var cell = grid.getCellFromIndex(gi.x, gi.y);
+        if(cell && cell.solid && cell.material === 'glass'){
+            var idx = grid.get1DIndexFrom2DIndex(gi.x, gi.y);
+            if(!bullet.glassHit[idx]){
+                bullet.glassHit[idx] = true;
+                grid.damageCell(idx, DAMAGE_AMOUNT.bullet, 'bullet');
+            }
+        }
+    }
+}
 function gameloop_bullets(deltaTime){
     //////////////////////
     //Bullets
@@ -1191,6 +1322,9 @@ function gameloop_bullets(deltaTime){
         //anyone standing in that final gap would never be hit.
         var toX = reachedEnd ? bullet.target.x : bullet.x;
         var toY = reachedEnd ? bullet.target.y : bullet.y;
+
+        //Chip any glass this shot flew through (it never stops the bullet, only cracks).
+        damageGlassInBulletPath(bullet, fromX, fromY, toX, toY);
 
         //A hero's bullet looks for guards, a guard's looks for heroes. Guards have
         //never shot each other and Phase 4 is not the phase to start. While a hero is
@@ -1329,6 +1463,19 @@ function gameloop_doors(deltaTime){
                 if(hero.ability_kick_doors && keys['shift']){
                     door_inst.open();
                     door_inst.broken = true;
+                }
+            }
+            //A dragged guard brings their proximity lock along: while you're hauling a guard,
+            //any door they get near opens for you — even a locked one. The door stays locked
+            //(its `unlocked` flag is untouched); it only opens because the guard's lock is in
+            //range, and it closes again once you drag them away. A dead body still carries the
+            //lock, which is why this checks the drag target directly rather than the physics
+            //sensor — a corpse has no body in the world for the sensor to detect. Any hero
+            //(local or teammate) may be dragging one.
+            for(var di = 0; di < heroes.length; di++){
+                var draggedUnit = heroes[di].drag_target;
+                if(draggedUnit && get_distance(door_center_x,door_center_y,draggedUnit.x,draggedUnit.y) <= draggedUnit.radius*4){
+                    door_inst.openerNear = true;
                 }
             }
             if(door_inst.openerNear){
@@ -1579,6 +1726,12 @@ function gameloop(deltaTime){
     if(mpIsHost())nav.update(deltaTime);
 
     //////////////////////
+    //squad coordination (Phase 6b): re-decide entry-point assignments (~1 Hz, or right after a
+    //death/breach/belief move). Runs after nav.update so it reads a freshly decayed danger layer.
+    //////////////////////
+    squad.update(gameClock.now());
+
+    //////////////////////
     //update Mouse
     //////////////////////
     if(mouse_relative.x != -10000)mouse = camera.getMouse(mouse_relative);//only set mouse position if the mouse is on the stage
@@ -1740,6 +1893,12 @@ function gameloop(deltaTime){
     if(mpIsHost()){
         gameloop_guards(deltaTime);
 
+        //Sprinting into a guard shoves them: runs after the guards picked their velocities and
+        //before the physics step, so the launch is what gets integrated this step. The hero
+        //cannot sprint while dragging a body, matching the sprint gate in src/systems/input.ts.
+        //Guards are host-simulated, so the shove (and the stun it causes) is host-authoritative.
+        sprintKnockback(hero, guards, keys['shift'] && !hero.drag_target);
+
         if(notifyGuardsOfHeroLocation)console.log("Repath all guards to hero last seen");
         notifyGuardsOfHeroLocation = false;
     }
@@ -1776,6 +1935,12 @@ function gameloop(deltaTime){
 
     //the bomb fuse is world state — host adjudicates the blast
     if(mpIsHost())gameloop_bomb(deltaTime);
+
+    //Grenades (Phase 8): advance thrown frags/smoke/flash and any lingering smoke cloud.
+    //Runs after the physics step so it can freely add/remove smoke's vision-blocker bodies.
+    //Grenades are thrown locally on each machine, so this advances every machine's own
+    //grenades (not host-gated) — the world effects on the host are what snapshots replicate.
+    updateGrenades(deltaTime);
 
     gameloop_getawaycar_and_loot(deltaTime);
 
@@ -1887,11 +2052,25 @@ function updateMessage(){
     }
     message.text = (textForMessage);
 };
+//How long between backup waves, and how big each wave is. Phase 6b: reinforcements arrive in
+//clumps of 2-3 a few seconds apart, already alarmed and sharing the squad belief — instead of
+//7 guards trickling in one-per-second and wandering in cold to the same doorway.
+var BACKUP_WAVE_INTERVAL_MS = 5000;
 function spawn_backup(){
     newMessage("The police have arrived!");
-    
-    for(var backup = 0; backup < numOfBackupGuards; backup++){
-        gameClock.after(1000*backup, spawn_individual_backup);//wait an extra second for each guard
+
+    //Split numOfBackupGuards into waves of 3,2,2,... and schedule one wave per interval.
+    var remaining = numOfBackupGuards;
+    var waveIndex = 0;
+    while(remaining > 0){
+        var waveSize = Math.min(remaining, waveIndex % 2 === 0 ? 3 : 2);
+        (function(size, index){
+            gameClock.after(index * BACKUP_WAVE_INTERVAL_MS, function(){
+                for(var k = 0; k < size; k++)spawn_individual_backup();
+            });
+        })(waveSize, waveIndex);
+        remaining -= waveSize;
+        waveIndex++;
     }
 }
 function spawn_individual_backup(){
@@ -1900,7 +2079,12 @@ function spawn_individual_backup(){
     newGuard.x = guard_backup_spawn.x;
     newGuard.y = guard_backup_spawn.y;
     physics.addGuard(newGuard, newGuard.radius);
-    //if(newGuard.alive)newGuard.becomeAlarmed();
+    //Enter the fight already alarmed and known to the blackboard. chasingHero=false so the
+    //alarmed branch runs steerAlarmed immediately: the squad assigns this guard an entrance
+    //and it flanks in on the shared belief rather than marching to one fixed point.
+    newGuard.becomeAlarmed();
+    newGuard.chasingHero = false;
+    squad.addGuard(newGuard);
     guards.push(newGuard);
 
 }
@@ -1931,6 +2115,8 @@ function unsilenced_gun(shooter){
     alert_all_guards(shooter);
     //set lastSeen for investigating hero
     shooter.setLastSeen(null);
+    //Phase 6b: a loud shot tells the whole squad where the hero is.
+    squad.updateBelief(shooter.x, shooter.y, gameClock.now());
 
 }
 
@@ -2023,8 +2209,8 @@ function checkUnmaskSeen(unmaskedHero){
                 //set lastSeen for investigating hero
                 unmaskedHero.setLastSeen(guard);
                 guard.sawHeroLastAt = {x:unmaskedHero.x,y:unmaskedHero.y};
-
-
+                //Phase 6b: fuse this sighting into the one shared squad belief.
+                squad.updateBelief(unmaskedHero.x, unmaskedHero.y, gameClock.now());
             }
         }
     }
@@ -2118,7 +2304,9 @@ function explodeBomb(){
         last_seen_active = true;
         //repath alert guards to hero
         notifyGuardsOfHeroLocation = true;
-
+        //Phase 6b: the blast is where the squad now believes the hero is (a distraction lure).
+        squad.updateBelief(bomb.x, bomb.y, gameClock.now());
+    
     //destroy nearby walls:
     //Every cell in the blast radius takes a large `bomb` hit through the one damage entry
     //point (roadmap §6.2). damageCell decides per cell whether it breaks — it skips the

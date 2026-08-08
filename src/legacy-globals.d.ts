@@ -97,6 +97,7 @@ declare global {
   var jo_grid: any;
   var tile_container_black: any;
   var tile_container_brown: any;
+  var tile_container_glass: any;
   var tile_container_purple: any;
   var tile_container_red: any;
   var tile_container_white: any;
