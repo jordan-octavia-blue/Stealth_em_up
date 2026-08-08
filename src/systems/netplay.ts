@@ -76,10 +76,14 @@ const readyPlayers = new Set<number>();
 let goSent = false;
 let missionStartedAt = 0;
 
-// host: cells destroyed this mission, for keyframe healing
+// host: cells destroyed this mission — broadcast immediately (walls coming down
+// must be seen the moment they happen) and remembered for keyframe healing
 const destroyedCells: number[] = [];
 events.on('cell:destroyed', (idx) => {
-  if (isHost() && missionRunning && typeof idx === 'number') destroyedCells.push(idx);
+  if (isHost() && missionRunning && typeof idx === 'number') {
+    destroyedCells.push(idx);
+    broadcastEvent('cell_destroyed', { cell: idx });
+  }
 });
 
 // client: interpolation buffers
@@ -95,6 +99,8 @@ let latestSnapTick = -1;
 let renderTick = -1;
 /** host: latest van state streamed by a remote driver (speed feeds lethality). */
 let remoteVanSpeed = 0;
+/** client: when we last initiated a drag/choke, for the reconcile grace window. */
+let lastDragActionAt = 0;
 
 function resetMissionNetState(): void {
   tick = 0;
@@ -210,6 +216,18 @@ function applyReplicaFlags(h: any, flags: number, gunId: number): void {
   if (wantsInCar !== isHeroInCar(h)) {
     if (wantsInCar) enterCar(h);
     else exitCar(h);
+  }
+}
+
+/** CLIENT: the world-owned bits of MY OWN hero, granted by the host (loot). */
+function applyOwnHeroWorldBits(flags: number): void {
+  const h = window.hero;
+  const carrying = !!(flags & HeroFlag.Carry);
+  if (carrying && !h.carry) {
+    h.carry = window.loot && window.loot[0] ? window.loot[0] : { net: true };
+    window.newMessage("You've got the money!  Get it to the van and drive to the escape zone!");
+  } else if (!carrying && h.carry) {
+    h.carry = null;
   }
 }
 
@@ -570,7 +588,243 @@ function handleGameMessage(m: GameMessage): void {
   }
 }
 
+// --- requests (client -> host) ------------------------------------------------
+
+/** Generous validation radius: the replica lags the client by ~RTT, so 1.5x. */
+const REQUEST_TOLERANCE = 1.5;
+
+function replicaNear(pid: number, x: number, y: number, maxDist: number): boolean {
+  const h = heroByPlayerId(pid);
+  if (!h) return false;
+  return window.get_distance(h.x, h.y, x, y) <= maxDist * REQUEST_TOLERANCE;
+}
+
+/**
+ * HOST: execute a client's world-mutating interaction, re-validating the same
+ * proximity rule the client checked. A denied request is simply dropped — the
+ * client's optimistic local change self-heals from the next snapshots.
+ */
+function handleRequest(pid: number, msg: JsonMsg): void {
+  if (!isHost() || !inMission()) return;
+  const h = heroByPlayerId(pid);
+  if (!h) return;
+  const grid = window.grid;
+  const guards = window.guards as any[];
+  switch (msg.name) {
+    case 'unlock_door': {
+      const i = msg.door as number;
+      const door = grid && grid.doors ? grid.doors[i] : null;
+      if (!door || !door.solid) return; //already unlocked/broken
+      const cx = door.x + grid.cell_size / 2;
+      const cy = door.y + grid.cell_size / 2;
+      if (!replicaNear(pid, cx, cy, h.radius * 5)) return;
+      grid.door_sprites[i].unlock();
+      break;
+    }
+    case 'choke': {
+      const guard = guards[msg.guard as number];
+      if (!guard || !guard.alive || guard.being_choked_out) return;
+      if (guard.dragged_by && guard.dragged_by !== h) return; //claimed by someone else
+      if (!replicaNear(pid, guard.x, guard.y, h.radius * window.dragDistance)) return;
+      guard.moving = true;
+      guard.path = [];
+      guard.target = { x: null, y: null };
+      guard.being_choked_out = true;
+      physics.removeActor(guard);
+      h.drag_target = guard;
+      guard.dragged_by = h;
+      //the kill timer lives here, with the authoritative world
+      window.gameClock.after(h.ability_choke_speed, () => {
+        if (h.drag_target === guard) {
+          window.newMessage('The guard is dispached!');
+          guard.kill();
+        }
+      });
+      break;
+    }
+    case 'drag': {
+      const guard = guards[msg.guard as number];
+      if (!guard || guard.alive) return; //drag is for corpses
+      if (guard.dragged_by && guard.dragged_by !== h) return;
+      if (!replicaNear(pid, guard.x, guard.y, h.radius * window.dragDistance)) return;
+      h.drag_target = guard;
+      guard.dragged_by = h;
+      guard.stop_distance = h.radius * 2;
+      break;
+    }
+    case 'drop': {
+      if (h.drag_target) {
+        h.drag_target.stop_dragging && h.drag_target.stop_dragging();
+        h.drag_target.dragged_by = null;
+        h.drag_target = null;
+      }
+      break;
+    }
+    case 'hack_cam': {
+      const cam = window.security_cameras[msg.cam as number];
+      if (!cam || !cam.alive || cam.hacked) return;
+      if (!replicaNear(pid, cam.x, cam.y, h.radius * window.dragDistance)) return;
+      cam.hacked = true;
+      break;
+    }
+    case 'disable_cams': {
+      const computer = window.computer_for_security_cameras;
+      if (window.cameras_disabled || !computer) return;
+      if (!replicaNear(pid, computer.x, computer.y, h.radius * 4)) return;
+      window.cameras_disabled = true;
+      window.newMessage('All security cameras have been disabled!');
+      computer.sprite.texture = window.img_computer_off;
+      for (const cam of window.security_cameras) cam.sprite.texture = window.img_cam_off;
+      break;
+    }
+    case 'plant_bomb': {
+      const x = msg.x as number;
+      const y = msg.y as number;
+      if (!replicaNear(pid, x, y, 64)) return;
+      window.plantBombAt(x, y);
+      const fuse = msg.fuse as number;
+      if (fuse > 0) window.setBomb(fuse);
+      break;
+    }
+    case 'detonate_bomb': {
+      if (window.bomb && window.bomb.sprite.visible && !window.bomb_ticking) window.setBomb(500);
+      break;
+    }
+    case 'fire': {
+      if (!h.alive || h.downed) return;
+      h.aim.set(h.x, h.y, msg.tx as number, msg.ty as number);
+      h.gun.shoot(h); //spawns the authoritative bullets (and rebroadcasts tracers)
+      window.doGunShotEffects(h, h.gun.silenced);
+      window.ejectShell && window.ejectShell(h);
+      if (!h.gun.silenced) window.unsilenced_gun(h);
+      break;
+    }
+    case 'pickup_gun': {
+      const id = msg.id as number | null;
+      const drops = window.gun_drops as any[];
+      if (id != null) {
+        const drop = drops.find((d) => d.netId === id && !d.flag_for_removal);
+        if (drop) {
+          if (!replicaNear(pid, drop.x, drop.y, h.radius * window.dragDistance)) return;
+          //the requester's replica now carries that gun (their HERO_STATE will
+          //confirm); everyone else loses the pickup
+          h.gun = drop.gun;
+          window.setHeroImageFor(h);
+          drop.remove_from_parent();
+          drop.flag_for_removal = true;
+          broadcastEvent('gun_removed', { id });
+        }
+      }
+      //the old gun lands where they stood — drop_gun broadcasts the spawn itself
+      const droppedName = msg.dropped as string;
+      const prefab = (window.all_gun_prefabs as any[]).find((p) => p.name === droppedName);
+      if (prefab) window.drop_gun(prefab.make_copy(), msg.x as number, msg.y as number);
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+// --- events (host -> clients) --------------------------------------------------
+
+function broadcastEvent(name: string, payload: Record<string, unknown>, exceptPeer?: PeerId): void {
+  if (!session || !isHost()) return;
+  session.broadcastJson({ t: 'ev', name, ...payload }, exceptPeer);
+}
+
+/** Exposed to main.ts (drop_gun, plantBombAt, explodeBomb) via window. */
+function mpBroadcastEvent(name: string, payload: Record<string, unknown>): void {
+  broadcastEvent(name, payload);
+}
+
+/** Hooked from jo_gun.shoot: relay tracers + gunshot audio to the other machines. */
+function mpOnShotFired(unit: any, gun: any, shots: Array<{ tx: number; ty: number; speed: number }>): void {
+  if (!session || !isHost() || !inMission()) return;
+  const isHeroShot = window.isHeroUnit(unit);
+  //the shooter's own machine already has its local tracer — don't echo it back
+  let except: PeerId | undefined;
+  if (isHeroShot && unit !== window.hero) {
+    const player = session.players.find((p) => p.playerId === unit.playerId);
+    except = player ? player.peerId : undefined;
+  }
+  broadcastEvent(
+    'shot',
+    {
+      kind: isHeroShot ? 'hero' : 'guard',
+      pid: isHeroShot ? unit.playerId : 255,
+      guardIdx: isHeroShot ? -1 : (window.guards as any[]).indexOf(unit),
+      x: unit.x,
+      y: unit.y,
+      silenced: !!gun.silenced,
+      shots,
+    },
+    except,
+  );
+}
+
+function handleEvent(msg: JsonMsg): void {
+  if (!isClient() || !inMission()) return;
+  switch (msg.name) {
+    case 'shot': {
+      const shooter =
+        msg.kind === 'hero'
+          ? heroByPlayerId(msg.pid as number)
+          : (window.guards as any[])[msg.guardIdx as number];
+      const origin = shooter || { x: msg.x, y: msg.y };
+      window.play_sound(msg.silenced ? window.sound_gun_shot_silenced : window.sound_gun_shot);
+      for (const s of (msg.shots as Array<{ tx: number; ty: number; speed: number }>) || []) {
+        const bullet = new window.jo_sprite(new window.PIXI.Sprite(window.img_bullet));
+        bullet.ignore = origin;
+        bullet.x = msg.x;
+        bullet.y = msg.y;
+        bullet.target = { x: s.tx, y: s.ty };
+        bullet.rotate_to_instant(s.tx, s.ty);
+        bullet.speed = s.speed;
+        bullet.stop_distance = s.speed;
+        window.bullets.push(bullet);
+      }
+      break;
+    }
+    case 'gun_drop': {
+      const prefab = (window.all_gun_prefabs as any[]).find((p) => p.name === msg.gun);
+      if (prefab) {
+        window.spawnGunDrop(prefab.make_copy(), msg.x as number, msg.y as number, msg.id as number);
+      }
+      break;
+    }
+    case 'gun_removed': {
+      const drops = window.gun_drops as any[];
+      const drop = drops.find((d) => d.netId === msg.id && !d.flag_for_removal);
+      if (drop) {
+        drop.remove_from_parent();
+        drop.flag_for_removal = true;
+      }
+      break;
+    }
+    case 'bomb_planted':
+      window.plantBombAt(msg.x as number, msg.y as number);
+      break;
+    case 'bomb_exploded':
+      window.explodeBombFX(msg.x as number, msg.y as number);
+      break;
+    case 'cell_destroyed':
+      applyDestroyedCells([msg.cell as number]);
+      break;
+    default:
+      break;
+  }
+}
+
 function handleJson(fromPlayerId: number, msg: JsonMsg): void {
+  switch (msg.t) {
+    case 'req':
+      handleRequest(fromPlayerId, msg);
+      return;
+    case 'ev':
+      handleEvent(msg);
+      return;
+  }
   switch (msg.t) {
     case 'start':
       if (!isHost() && !missionRunning) {
@@ -612,8 +866,15 @@ function applySnapshot(snap: Snapshot): void {
   if (snap.tick <= latestSnapTick) return; //stale/duplicate
   latestSnapTick = snap.tick;
 
+  let anyCarry = false;
   for (const sh of snap.heroes) {
-    if (sh.playerId === (window.mpLocalPlayerId ?? 0)) continue; //client-auth own hero
+    if (sh.flags & HeroFlag.Carry) anyCarry = true;
+    if (sh.playerId === (window.mpLocalPlayerId ?? 0)) {
+      //own hero is client-authoritative EXCEPT the bits the world owns: whether
+      //the host granted us the loot (position/flags stay ours)
+      applyOwnHeroWorldBits(sh.flags);
+      continue;
+    }
     const h = heroByPlayerId(sh.playerId);
     if (!h) continue;
     let buf = heroBufs.get(sh.playerId);
@@ -624,6 +885,8 @@ function applySnapshot(snap: Snapshot): void {
     buf.push(snap.tick, { x: sh.x, y: sh.y, rad: sh.rad });
     applyRemoteHeroVisuals(h, sh.flags, sh.gunId);
   }
+  //the money can only be in one place: on the floor iff nobody carries it
+  if (window.loot && window.loot[0]) window.loot[0].sprite.visible = !anyCarry;
 
   for (const sg of snap.guards) {
     const guard = ensureGuardReplica(sg.idx, sg.flags);
@@ -648,13 +911,34 @@ function applySnapshot(snap: Snapshot): void {
 
   //dragged bodies follow the host's authority — except my own drag, which I
   //simulate locally so it never trails me
+  const draggedIdxs = new Set<number>();
   for (const dr of snap.dragged) {
+    draggedIdxs.add(dr.guardIdx);
     if (dr.draggerId === (window.mpLocalPlayerId ?? 0)) continue;
     const guard = window.guards[dr.guardIdx];
     if (guard) {
       guard.x = dr.x;
       guard.y = dr.y;
       guard.beingDraggedNet = true;
+    }
+  }
+  for (let i = 0; i < window.guards.length; i++) {
+    if (!draggedIdxs.has(i)) window.guards[i].beingDraggedNet = false;
+  }
+  //reconcile my optimistic drag/choke: if the host's authoritative list says my
+  //guard isn't mine (someone else claimed it, or the request was denied), let go.
+  //A grace period covers the round trip before the host has heard about it.
+  const my = window.hero;
+  if (my.drag_target) {
+    const myIdx = (window.guards as any[]).indexOf(my.drag_target);
+    const hostSaysMine = snap.dragged.some(
+      (d) => d.guardIdx === myIdx && d.draggerId === (window.mpLocalPlayerId ?? 0),
+    );
+    if (!hostSaysMine && performance.now() - lastDragActionAt > 1500) {
+      my.drag_target.stop_dragging && my.drag_target.stop_dragging();
+      my.drag_target.dragged_by = null;
+      my.drag_target = null;
+      my.speed = my.speed_walk;
     }
   }
 
@@ -857,6 +1141,10 @@ function setupFromUrl(): void {
     });
     setSession(session);
     setNetHooks({ apply: applyIncoming, collect: collectOutgoing });
+    setRequestSender((name, payload) => {
+      if (name === 'drag' || name === 'choke') lastDragActionAt = performance.now();
+      if (session) session.sendJsonToHost({ t: 'req', name, ...payload });
+    });
     onRosterChanged();
   };
 
@@ -881,6 +1169,11 @@ function setupFromUrl(): void {
 setupFromUrl();
 
 // --- legacy global bridge ---------------------------------------------------
-Object.assign(window, { mpTryStartMission, mpRemoveRemoteHero: removeRemoteHero });
+Object.assign(window, {
+  mpTryStartMission,
+  mpRemoveRemoteHero: removeRemoteHero,
+  mpBroadcastEvent,
+  mpOnShotFired,
+});
 
 export { mpTryStartMission };

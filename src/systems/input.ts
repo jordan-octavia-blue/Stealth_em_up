@@ -17,6 +17,12 @@ import { cyclePhysicsDebug } from './physics_debug';
 import { cycleBreachDebug } from './breach_debug';
 import { physics } from '../physics';
 import { isInCar, toggleCar } from './car';
+import { mpAction, isClient as netIsClient } from './mp';
+
+//The world-mutations in this file run locally for instant feel (single-player and
+//host: that IS the authoritative run; client: optimistic, self-healed by
+//snapshots) — and mpAction additionally sends the request when we're a client.
+function mpNoop(){}
 
 export function mouseMove(e){
     //Viewport coords, not document coords: camera.getMouse wants the position within the
@@ -128,7 +134,11 @@ export function addKeyHandlers(){
                         //stale flag, we raise it now, the callback drops it when the plant finishes.
                         circProgBar.reset(hero.x,hero.y,1500,function(){
                             hero.plantingBomb = false;
-                            plantBomb();
+                            hero.moving = true;
+                            //the bomb landing in the world is a host decision
+                            mpAction('plant_bomb',{x:hero.x,y:hero.y,fuse:0},function(){
+                                plantBombAt(hero.x,hero.y);
+                            });
                             bomb_tooltip.text = ("Press 'f' to detonate");
                         });
                         hero.plantingBomb = true;
@@ -138,7 +148,14 @@ export function addKeyHandlers(){
                         //if f isn't already pressed and bomb isn't already set
                         if(bombs_left>0){
                             hero.moving = false;
-                            circProgBar.reset(hero.x,hero.y,1500,function(){hero.plantingBomb=false;plantBomb();setBomb(5000);});
+                            circProgBar.reset(hero.x,hero.y,1500,function(){
+                                hero.plantingBomb = false;
+                                hero.moving = true;
+                                mpAction('plant_bomb',{x:hero.x,y:hero.y,fuse:5000},function(){
+                                    plantBombAt(hero.x,hero.y);
+                                    setBomb(5000);
+                                });
+                            });
                             hero.plantingBomb = true;
                             bombs_left--;
                         }else{
@@ -150,7 +167,7 @@ export function addKeyHandlers(){
                 if(!keys['f'] && bomb.sprite.visible){
                     if(hero.ability_remote_bomb){
                         //set remote bomb
-                        setBomb(500);
+                        mpAction('detonate_bomb',{},function(){ setBomb(500); });
                     }
                 }
                 keys['f'] = true;
@@ -188,7 +205,15 @@ export function addKeyHandlers(){
                                 //timer
                                 var unlockTimeRemaining = hero.lockpick_speed;
                                 hero.lockpicking = true;
-                                circProgBar.reset(door.x+grid.cell_size/2,door.y+grid.cell_size/2,unlockTimeRemaining,grid.door_sprites[i].unlock.bind(grid.door_sprites[i]));
+                                //the channel is local; the UNLOCK at the end is a
+                                //world change — host runs it, a client asks for it
+                                circProgBar.reset(door.x+grid.cell_size/2,door.y+grid.cell_size/2,unlockTimeRemaining,(function(doorIndex){
+                                    return function(){
+                                        mpAction('unlock_door',{door:doorIndex},function(){
+                                            grid.door_sprites[doorIndex].unlock();
+                                        });
+                                    };
+                                })(i));
                                 //cancel unlocking if hero moves away from door, unless hero has unlocked remote unlock
                                 if(!hero.ability_remote_lockpick)circProgBar.distanceCancelTarget = {x:door.x,y:door.y};
 
@@ -214,6 +239,7 @@ export function addKeyHandlers(){
                                     guard.dragged_by = hero;
                                     guard.speed = hero.speed;
                                     guard.stop_distance = hero.radius*2;//I don't know why but the stop distance here seems to need to be bigger by a factor of 10
+                                    mpAction('drag',{guard:i},mpNoop);
                                     //return;//don't return, this allows choking out a guard to have higher precedence than dragging a body
                                 }else{
                                     //hero is choking out a live guard who is not already alarmed:
@@ -238,25 +264,32 @@ export function addKeyHandlers(){
                                     guard.dragged_by = hero;
                                     guard.speed = hero.speed;
                                     guard.stop_distance = hero.radius*2;//I don't know why but the stop distance here seems to need to be bigger by a factor of 10
-                                    //the choke belongs to THIS hero — capture it so the
-                                    //timer works when several players drag at once
-                                    var chokingHero = hero;
-                                    gameClock.after(hero.ability_choke_speed, function(){
-                                        //check that the guard is still being choked out by that hero; if not, he's not dead so don't kill() him
-                                        if(chokingHero.drag_target == this){
-                                            newMessage('The guard is dispached!');
-                                            this.kill();
-                                            //if space isn't still being held release body:
-                                            if(!keys['space']){
-                                                //drag is a toggle action so release current drag target.
-                                                this.stop_dragging();
-                                                this.dragged_by = null;
-                                                chokingHero.drag_target = null;
-                                                //bring hero speed back to normal
-                                                chokingHero.speed = chokingHero.speed_walk;
+                                    mpAction('choke',{guard:i},mpNoop);
+                                    //The kill at the end of the choke is world state:
+                                    //host-only. A client's version of this timer lives on
+                                    //the host (started by the choke request); the guard's
+                                    //death comes back in the snapshot.
+                                    if(!netIsClient()){
+                                        //the choke belongs to THIS hero — capture it so the
+                                        //timer works when several players drag at once
+                                        var chokingHero = hero;
+                                        gameClock.after(hero.ability_choke_speed, function(){
+                                            //check that the guard is still being choked out by that hero; if not, he's not dead so don't kill() him
+                                            if(chokingHero.drag_target == this){
+                                                newMessage('The guard is dispached!');
+                                                this.kill();
+                                                //if space isn't still being held release body:
+                                                if(!keys['space']){
+                                                    //drag is a toggle action so release current drag target.
+                                                    this.stop_dragging();
+                                                    this.dragged_by = null;
+                                                    chokingHero.drag_target = null;
+                                                    //bring hero speed back to normal
+                                                    chokingHero.speed = chokingHero.speed_walk;
+                                                }
                                             }
-                                        }
-                                    }.bind(guard));
+                                        }.bind(guard));
+                                    }
                                     return;
                                 }
 
@@ -271,6 +304,7 @@ export function addKeyHandlers(){
                             var cam = security_cameras[s];
                             if(hero.alive && get_distance(hero.x,hero.y,cam.x,cam.y) <= hero.radius*dragDistance){
                                 cam.hacked = true;
+                                mpAction('hack_cam',{cam:s},mpNoop);
                             }
                         }
 
@@ -285,6 +319,7 @@ export function addKeyHandlers(){
                                 security_cameras[i].sprite.texture = (img_cam_off);
 
                             }
+                            mpAction('disable_cams',{},mpNoop);
                         }
                     }
 
@@ -335,6 +370,7 @@ export function addKeyHandlers(){
                 hero.drag_target = null;
                 //bring hero speed back to normal
                 hero.speed = hero.speed_walk;
+                mpAction('drop',{},mpNoop);
             }
             //allow user to abort unlocking door:
             if(grid.a_door_is_being_unlocked && !hero.ability_remote_lockpick){
@@ -379,6 +415,8 @@ export function addKeyHandlers(){
                         ejectShell(hero);
 
                         hero.shoot();
+                        //the authoritative bullet (damage) is the host's — send our aim
+                        mpAction('fire',{tx:hero.aim.end.x,ty:hero.aim.end.y},mpNoop);
                         if(!hero.gun.silenced)unsilenced_gun(hero);//make noise (not real sound, but noise for guards) which draws guards
                         window.mouse_click_obj = camera.objectivePoint_ignore_shake(clickEvent);  //uses clickEvent's .x and .y to find objective click
 
@@ -394,17 +432,24 @@ export function addKeyHandlers(){
             //RMB
             keys['RMB'] = true;
             var oldgun = hero.gun;
+            var pickedDropId = null;
             for(var i = 0; i < gun_drops.length; i++){
                 var gun_drop = gun_drops[i];
                 //if close to gun_drop, pick it up:
                 if(get_distance(hero.x,hero.y,gun_drop.x,gun_drop.y) <= hero.radius*dragDistance){
+                    pickedDropId = gun_drop.netId;
                     pickUpGunDrop(gun_drop);
                     break;
                 }
             }
             if(oldgun != hero.gun){
-              // if hero picked up a gun:
-              drop_gun(oldgun,hero.x,hero.y);
+              // if hero picked up a gun. The swap itself is instant on this machine;
+              // the old gun landing on the floor is world state — on a client the
+              // HOST creates that drop (and removes the taken one) so every machine
+              // agrees which guns lie where.
+              mpAction('pickup_gun',{id:pickedDropId, dropped:oldgun.name, x:hero.x, y:hero.y},function(){
+                  drop_gun(oldgun,hero.x,hero.y);
+              });
               setHeroImage();
             }
         }

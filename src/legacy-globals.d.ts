@@ -221,6 +221,12 @@ declare global {
   var mpSessionRoster: any;
   var mpLocalPlayerId: any;
   var mpTryStartMission: any;
+  var mpBroadcastEvent: any;
+  var mpOnShotFired: any;
+  var next_gun_drop_id: any;
+  var spawnGunDrop: any;
+  var plantBombAt: any;
+  var explodeBombFX: any;
   var hero_end_aim_coord: any;
   var hero_is_dead: any;
   var hero_last_seen: any;

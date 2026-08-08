@@ -28,7 +28,7 @@ import {
 } from '../systems/car';
 import { loadMap } from '../map/loader';
 import { DAMAGE_AMOUNT } from '../map/tileset';
-import { mpApplyIncoming, mpCollectOutgoing, isHost as mpIsHost, isClient as mpIsClient } from '../systems/mp';
+import { mpApplyIncoming, mpCollectOutgoing, isHost as mpIsHost, isClient as mpIsClient, mpAction } from '../systems/mp';
 // Side-effect import: wires the breach FX + AI listeners onto `cell:destroyed` (roadmap
 // §6.2 pipeline steps 6-7). No exported symbols; importing it once is the whole point.
 import '../systems/breach';
@@ -1605,6 +1605,8 @@ function gameloop(deltaTime){
             events.emit('camera:kickback');
             ejectShell(hero);
             hero.shoot();
+            //authoritative bullet is the host's — stream our aim (no-op single/host)
+            mpAction('fire',{tx:hero.aim.end.x,ty:hero.aim.end.y},function(){});
             if(!hero.gun.silenced)unsilenced_gun(hero);//make noise (not real sound, but noise for guards) which draws guards
             window.mouse_click_obj = camera.objectivePoint_ignore_shake(clickEvent);  //uses clickEvent's .x and .y to find objective click
 
@@ -2083,13 +2085,18 @@ function gameloop_bomb(deltaTime){
         explodeBomb();
     }
 }
-function explodeBomb(){
+//The audible/visible part of the blast — runs on every machine (clients get it
+//as an event); the world damage below it is host-only adjudication.
+function explodeBombFX(x,y){
     play_sound(sound_explosion);
-
     camera.startShake(300,12);
     bomb.sprite.visible = false;
     bomb_tooltip.visible = false;
-    
+}
+function explodeBomb(){
+    explodeBombFX(bomb.x,bomb.y);
+    if(window.mpBroadcastEvent)mpBroadcastEvent('bomb_exploded',{x:bomb.x,y:bomb.y});
+
     //set last seen: the blast is the alarming thing, guards converge on IT
 
         alert_all_guards(bomb);
@@ -2147,20 +2154,28 @@ function explodeBomb(){
         }
     }
 }
-function plantBomb(){
-    //like set bomb, but doesn't start the fuse
-    
-    //allow hero to move again:
-    hero.moving = true;
-    
+//Place the bomb visuals/state at a position — shared by the local plant and the
+//networked bomb_planted event (a teammate's plant shows up through this).
+function plantBombAt(x,y){
     bomb.sprite.visible = true;
-    bomb.x = hero.x;
-    bomb.y = hero.y;
+    bomb.x = x;
+    bomb.y = y;
     bomb_tooltip.objX = bomb.x;
     bomb_tooltip.objY = bomb.y-32;
     bomb_tooltip.visible = true;
+    if(window.mpBroadcastEvent)mpBroadcastEvent('bomb_planted',{x:x,y:y});
 }
-function drop_gun(gun,x,y){
+function plantBomb(){
+    //like set bomb, but doesn't start the fuse
+
+    //allow hero to move again:
+    hero.moving = true;
+
+    plantBombAt(hero.x,hero.y);
+}
+//Create the floor pickup for a gun. netId is the cross-machine identity — the
+//gun_drops array gets spliced, so indexes are useless as ids over the network.
+function spawnGunDrop(gun,x,y,netId){
     var image;
     switch(gun.name){
         case "Shotgun":
@@ -2179,7 +2194,17 @@ function drop_gun(gun,x,y){
             image = img_gun_machine;
             break;
     }
-    gun_drops.push(new jo_gun_drop(new PIXI.Sprite(image),display_effects,x,y,gun));
+    var drop = new jo_gun_drop(new PIXI.Sprite(image),display_effects,x,y,gun);
+    drop.netId = netId;
+    gun_drops.push(drop);
+    return drop;
+}
+window.next_gun_drop_id ??= 1;
+function drop_gun(gun,x,y){
+    var drop = spawnGunDrop(gun,x,y,next_gun_drop_id++);
+    //clients learn about drops from the host (guards only die on the host, so
+    //this is the only way a teammate's kill leaves a pickup on your floor)
+    if(window.mpBroadcastEvent)mpBroadcastEvent('gun_drop',{id:drop.netId,gun:gun.name,x:x,y:y});
 }
 function killHero(heroUnit,fromX,fromY){
     heroUnit.kill(fromX,fromY);
@@ -2256,6 +2281,6 @@ function getMapInfo(subdir, fileName){
 // `window`. It is an ES module now, so the functions below are republished as
 // globals for the not-yet-extracted code that still reads them by bare name.
 // See src/legacy-bridge.ts. Each extraction deletes another line from here.
-Object.assign(window, { getColor, windowSetup, fullscreen, drawBloodTrail, bakeBloodTrail, getUrlVars, removeAllChildren, clearStage, startMenu, startGame, setup_map, animate, reactionTimeout, gameloop_guards, gameloop_security_cams, removeBullet, gameloop_bullets, gameloop_guard_visibility, gameloop_doors, gameloop_dragtarget, gameloop_messages_and_tooltip, gameloop_getawaycar_and_loot, gameloop_alert_animation, pickUpGunDrop, gameloop, updateDebugInfo, newMessage, newFloatingMessage, updateMessage, spawn_backup, spawn_individual_backup, alert_all_guards, unsilenced_gun, setHeroImage, setHeroImageFor, useMask, hero_is_dead, doGunShotEffects, set_latestAlert, setBomb, gameloop_bomb, explodeBomb, plantBomb, drop_gun, killHero, getMapInfo, heroSpawnPoint, spawnExtraHero, isHeroUnit, pickSeenHero, learnFace, checkUnmaskSeen, enterCar, exitCar });
+Object.assign(window, { getColor, windowSetup, fullscreen, drawBloodTrail, bakeBloodTrail, getUrlVars, removeAllChildren, clearStage, startMenu, startGame, setup_map, animate, reactionTimeout, gameloop_guards, gameloop_security_cams, removeBullet, gameloop_bullets, gameloop_guard_visibility, gameloop_doors, gameloop_dragtarget, gameloop_messages_and_tooltip, gameloop_getawaycar_and_loot, gameloop_alert_animation, pickUpGunDrop, gameloop, updateDebugInfo, newMessage, newFloatingMessage, updateMessage, spawn_backup, spawn_individual_backup, alert_all_guards, unsilenced_gun, setHeroImage, setHeroImageFor, useMask, hero_is_dead, doGunShotEffects, set_latestAlert, setBomb, gameloop_bomb, explodeBomb, explodeBombFX, plantBomb, plantBombAt, drop_gun, spawnGunDrop, killHero, getMapInfo, heroSpawnPoint, spawnExtraHero, isHeroUnit, pickSeenHero, learnFace, checkUnmaskSeen, enterCar, exitCar });
 
 export {};
