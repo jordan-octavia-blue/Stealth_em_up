@@ -326,7 +326,13 @@ if(!isNaN(newVol)){
 }
 
 window.mapName = url_queryString["level"] || DEFAULT_LEVEL;
-getMapInfo("maps", mapName + ".jomap");
+//Play-from-editor handoff (Phase 10 map editor): the reserved level id "__draft__" loads the
+//map the editor stashed in localStorage instead of fetching a file from maps/.
+if (mapName === "__draft__") {
+    loadDraftMap();
+} else {
+    getMapInfo("maps", mapName + ".jomap");
+}
 
         
 function removeAllChildren(obj){
@@ -2127,6 +2133,24 @@ window.onresize = function (event){
 }
 /*Get map from server:*/
 window.map_json = "";
+//Play-from-editor handoff (Phase 10 map editor). The editor writes a validated map under this
+//localStorage key and opens game.html?level=__draft__; we load that here rather than fetching
+//from maps/. The key and level id are kept in sync with src/editor/persistence.ts.
+function loadDraftMap(){
+    try {
+        var raw = localStorage.getItem("stealth.play.__draft__");
+        if (!raw) {
+            alert("No editor map found. Build a map in the editor and press Play.");
+            return;
+        }
+        var map = loadMap(JSON.parse(raw));
+        map_json = map;
+        console.log("map loaded from editor draft");
+        windowSetup();
+    } catch (e) {
+        alert("Couldn't load the editor map: " + (e && (e as Error).message ? (e as Error).message : e));
+    }
+}
 function getMapInfo(subdir, fileName){
     fetch(subdir + "/" + fileName).then(function(response) {
         if (!response.ok) throw new Error("HTTP " + response.status);
