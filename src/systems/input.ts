@@ -349,8 +349,11 @@ export function addKeyHandlers(){
         }
 
         if(code == 27){
-            //esc
-            startMenu();
+            //esc — in a multiplayer mission the host ends the run for the party
+            //and a guest leaves the session; otherwise the usual menu return
+            if(!(window.mpHandleEscape && window.mpHandleEscape())){
+                startMenu();
+            }
         }
 
         hero_move_animation_check();

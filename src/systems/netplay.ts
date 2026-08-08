@@ -20,7 +20,8 @@
 import { events } from '../core/events';
 import { physics } from '../physics';
 import { LocalLobby, LocalTransport, randomPeerId } from '../net/transport';
-import type { LobbyProvider, PeerId } from '../net/transport';
+import type { LobbyProvider, PeerId, Transport } from '../net/transport';
+import { detectSteamBridges, SteamLobby, SteamTransport } from '../net/steam';
 import { NetSession, MAX_PLAYERS } from '../net/session';
 import type { GameMessage, PlayerInfo } from '../net/session';
 import {
@@ -511,7 +512,9 @@ function collectOutgoing(_deltaTime: number): void {
     }
     //READY timeout: don't let one wedged client hold the heist hostage
     if (!goSent && performance.now() - missionStartedAt > READY_TIMEOUT_MS) sendGo();
+    if (tick % 30 === 0) updatePingReadout();
   } else {
+    if (tick % 30 === 0) updatePingReadout();
     if (tick % HERO_SEND_EVERY_TICKS === 0) {
       const h = window.hero;
       const msg: HeroStateMsg = {
@@ -902,6 +905,13 @@ function handleJson(fromPlayerId: number, msg: JsonMsg): void {
       window.pause = false;
       window.newMessage && window.newMessage('The heist is on!');
       break;
+    case 'abort':
+      //the host ended the mission for the party — back to the lobby together
+      if (!isHost() && missionRunning) {
+        window.newMessage && window.newMessage('The host ended the mission.');
+        endMissionToMenu();
+      }
+      break;
     case 'keyframe':
       if (isClient() && inMission()) {
         const doors = msg.doors as { open: number; unlocked: number; broken: number };
@@ -1159,12 +1169,127 @@ function removeRemoteHero(playerId: number): void {
   heroBufs.delete(playerId);
 }
 
-// --- boot ---------------------------------------------------------------------
+// --- session creation (shared by the dev transport and Steam) ------------------
 
-function setupFromUrl(): void {
+function createSession(
+  transport: Transport,
+  hostPeerId: PeerId,
+  isMine: boolean,
+  localName: string,
+): void {
+  lobbyIsMine = isMine;
+  session = new NetSession({
+    transport,
+    role: isMine ? 'host' : 'client',
+    hostPeerId,
+    localName,
+    appBuild: APP_BUILD,
+    maxPlayers: MAX_PLAYERS,
+    callbacks: {
+      onRosterChanged: () => onRosterChanged(),
+      onPlayerLeft: (p) => {
+        window.newMessage && window.newMessage(p.name + ' left the game.');
+        if (missionRunning) removeRemoteHero(p.playerId);
+        onRosterChanged();
+      },
+      onHostLost: () => {
+        updateStatus('Connection to the host was lost.');
+        window.newMessage && window.newMessage('Connection to the host was lost.');
+        endMissionToMenu();
+        teardownSession();
+      },
+      onRejected: (reason) => updateStatus('Could not join: ' + reason),
+    },
+  });
+  setSession(session);
+  setNetHooks({ apply: applyIncoming, collect: collectOutgoing });
+  setRequestSender((name, payload) => {
+    if (name === 'drag' || name === 'choke') lastDragActionAt = performance.now();
+    if (session) session.sendJsonToHost({ t: 'req', name, ...payload });
+  });
+  onRosterChanged();
+  startMenuPump();
+}
+
+function teardownSession(): void {
+  if (session) session.close();
+  session = null;
+  setSession(null);
+  setNetHooks(null);
+  setRequestSender(null);
+  missionRunning = false;
+  setRole('single');
+}
+
+/** Back to the menu together (mission over/aborted); lobby + session survive. */
+function endMissionToMenu(): void {
+  missionRunning = false;
+  setRole('single');
+  window.pause = false;
+  if (window.state === 1 && window.startMenu) window.startMenu();
+  onRosterChanged();
+}
+
+/**
+ * Esc during a multiplayer mission: the host ends the mission for the whole
+ * party (everyone lands back in the lobby, ready for the next run); a guest
+ * quietly leaves the session. Returns true when multiplayer consumed the press.
+ */
+function mpHandleEscape(): boolean {
+  if (!session || !missionRunning) return false;
+  if (lobbyIsMine) {
+    session.broadcastJson({ t: 'abort' });
+    endMissionToMenu();
+  } else {
+    session.leave();
+    teardownSession();
+    updateStatus('You left the game.');
+    if (window.startMenu) window.startMenu();
+  }
+  return true;
+}
+
+let menuPumpStarted = false;
+function startMenuPump(): void {
+  if (menuPumpStarted) return;
+  menuPumpStarted = true;
+  //pump the session while in the menu too (gameloop isn't running there)
+  const menuPump = () => {
+    if (session && window.state === 0) session.pump(performance.now());
+    requestAnimationFrame(menuPump);
+  };
+  requestAnimationFrame(menuPump);
+}
+
+// --- in-mission ping readout ---------------------------------------------------
+
+let pingEl: HTMLElement | null = null;
+function updatePingReadout(): void {
+  if (!session) return;
+  if (!pingEl) {
+    pingEl = document.createElement('div');
+    pingEl.id = 'mp-ping';
+    pingEl.style.cssText =
+      'position:fixed;right:8px;bottom:8px;color:#8ef;font:12px monospace;' +
+      'background:rgba(0,20,40,0.55);padding:2px 8px;border-radius:3px;z-index:40;pointer-events:none;';
+    document.body.appendChild(pingEl);
+  }
+  if (!inMission()) {
+    pingEl.style.display = 'none';
+    return;
+  }
+  pingEl.style.display = 'block';
+  pingEl.textContent = lobbyIsMine
+    ? `hosting ${session.players.length} player${session.players.length === 1 ? '' : 's'}`
+    : `ping ${Math.round(session.rttMs)}ms`;
+}
+
+// --- boot: dev two-tab transport (?net=host / ?net=join) -----------------------
+
+function setupFromUrl(): boolean {
   const params = window.url_queryString || {};
   const mode = params['net'];
-  if (mode !== 'host' && mode !== 'join') return;
+  if (mode !== 'host' && mode !== 'join') return false;
   const room = params['room'] || 'dev';
   window.mpRoom = room;
 
@@ -1178,60 +1303,107 @@ function setupFromUrl(): void {
 
   const name = params['name'] || (mode === 'host' ? 'Host' : 'Guest-' + peerId.slice(0, 4));
 
-  const finishSetup = (info: { ownerId: PeerId }) => {
-    lobbyIsMine = info.ownerId === peerId;
-    session = new NetSession({
-      transport: localTransport!,
-      role: lobbyIsMine ? 'host' : 'client',
-      hostPeerId: info.ownerId,
-      localName: String(name),
-      appBuild: APP_BUILD,
-      maxPlayers: MAX_PLAYERS,
-      callbacks: {
-        onRosterChanged: () => onRosterChanged(),
-        onPlayerLeft: (p) => {
-          window.newMessage && window.newMessage(p.name + ' left the game.');
-          if (missionRunning) removeRemoteHero(p.playerId);
-          onRosterChanged();
-        },
-        onHostLost: () => {
-          updateStatus('Connection to the host was lost.');
-          window.newMessage && window.newMessage('Connection to the host was lost.');
-          missionRunning = false;
-          setRole('single');
-          window.startMenu && window.startMenu();
-        },
-        onRejected: (reason) => updateStatus('Could not join: ' + reason),
-      },
-    });
-    setSession(session);
-    setNetHooks({ apply: applyIncoming, collect: collectOutgoing });
-    setRequestSender((name, payload) => {
-      if (name === 'drag' || name === 'choke') lastDragActionAt = performance.now();
-      if (session) session.sendJsonToHost({ t: 'req', name, ...payload });
-    });
-    onRosterChanged();
-  };
-
   if (mode === 'host') {
-    lobby.createLobby(MAX_PLAYERS).then(finishSetup);
+    lobby.createLobby(MAX_PLAYERS).then((info) => {
+      createSession(localTransport!, info.ownerId, true, String(name));
+    });
   } else {
     updateStatus(`Looking for room "${room}"...`);
     lobby
       .joinLobby(room)
-      .then(finishSetup)
+      .then((info) => {
+        createSession(localTransport!, info.ownerId, false, String(name));
+      })
       .catch((err: Error) => updateStatus(err.message));
   }
-
-  //pump the session while in the menu too (gameloop isn't running there)
-  const menuPump = () => {
-    if (session && window.state === 0) session.pump(performance.now());
-    requestAnimationFrame(menuPump);
-  };
-  requestAnimationFrame(menuPump);
+  return true;
 }
 
-setupFromUrl();
+// --- boot: Steam (inside the Electron shell) -----------------------------------
+
+function setupSteam(): void {
+  const bridges = detectSteamBridges();
+  if (!bridges) return;
+  void (async () => {
+    let myId: string;
+    let myName: string;
+    try {
+      myId = String(await Promise.resolve(bridges.settings.mySteamId()));
+      myName = String(await Promise.resolve(bridges.settings.mySteamName()));
+    } catch {
+      updateStatus('Steam is not available — multiplayer disabled (single-player works).');
+      return;
+    }
+    const transport = new SteamTransport(bridges, myId);
+    const steamLobby = new SteamLobby(bridges, myId);
+    lobby = steamLobby;
+
+    //Guest path: the Electron shell joins a friend's lobby on its own (invite,
+    //friends list, +connect_lobby launch) and then tells us. The forked shell
+    //exposes the lobby owner; fall back to "the one other member" if not.
+    bridges.events.subscribeToLobbyJoined(() => {
+      void (async () => {
+        if (session) return; //already connected (own lobby echo or rejoin)
+        let ownerId: string | null = null;
+        const settingsAny = bridges.settings as unknown as {
+          getLobbyOwner?: () => Promise<string>;
+        };
+        if (typeof settingsAny.getLobbyOwner === 'function') {
+          try {
+            ownerId = String(await settingsAny.getLobbyOwner());
+          } catch {
+            ownerId = null;
+          }
+        }
+        const info = await steamLobby.attachExistingLobby(ownerId ?? myId);
+        if (!ownerId) {
+          const others = info.members.filter((m) => m !== myId);
+          ownerId = others.length === 1 ? others[0] : null;
+        }
+        if (!ownerId || ownerId === myId) {
+          updateStatus('Joined a lobby but could not identify the host (shell too old?).');
+          return;
+        }
+        createSession(transport, ownerId, false, myName);
+        updateStatus('Joined the lobby — waiting for the host to start...');
+      })();
+    });
+
+    //Menu buttons: host + invite
+    steamMenuButtons(
+      () => {
+        void steamLobby.createLobby(MAX_PLAYERS).then(() => {
+          createSession(transport, myId, true, myName);
+          updateStatus('Hosting — invite friends from the Steam overlay.');
+        });
+      },
+      () => steamLobby.openInviteDialog(),
+    );
+    updateStatus('Steam ready — host a heist or join a friend via Steam invites.');
+  })();
+}
+
+function steamMenuButtons(onHost: () => void, onInvite: () => void): void {
+  const parent = document.getElementById('instructions-container') || document.body;
+  const bar = document.createElement('div');
+  bar.id = 'mp-steam-buttons';
+  bar.style.cssText = 'margin:8px auto;text-align:center;';
+  const mkBtn = (label: string, fn: () => void) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.style.cssText =
+      'margin:0 6px;padding:8px 16px;font:14px monospace;background:#123;color:#8ef;' +
+      'border:1px solid #8ef;border-radius:4px;cursor:pointer;';
+    b.onclick = fn;
+    bar.appendChild(b);
+    return b;
+  };
+  mkBtn('Host Co-op Heist', onHost);
+  mkBtn('Invite Friends', onInvite);
+  parent.insertBefore(bar, parent.firstChild);
+}
+
+if (!setupFromUrl()) setupSteam();
 
 // --- legacy global bridge ---------------------------------------------------
 Object.assign(window, {
@@ -1239,6 +1411,7 @@ Object.assign(window, {
   mpRemoveRemoteHero: removeRemoteHero,
   mpBroadcastEvent,
   mpOnShotFired,
+  mpHandleEscape,
 });
 
 export { mpTryStartMission };
