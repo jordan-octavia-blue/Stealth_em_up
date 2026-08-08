@@ -108,6 +108,17 @@ window.gun_machine = withStats(new jo_gun("Machine Gun", 600,false,true,1,3), "m
 window.all_gun_prefabs = [gun_shotgun,gun_shotgun_sawed_off,gun_pistol,gun_pistol_silenced,gun_machine];
 window.all_gun_prefabs_without_sawed = [gun_shotgun,gun_pistol,gun_pistol_silenced,gun_machine];
 
+//Phase 10 (map editor): find a gun prefab by its data/weapons.json id (the seam the withStats
+//comment above anticipated). Returns the prefab, or null for an unknown id — the caller keeps
+//the constructor's random gun in that case, so a stray id never crashes a spawn.
+function gunPrefabById(id){
+    for(var g = 0; g < all_gun_prefabs.length; g++){
+        if(all_gun_prefabs[g].id === id) return all_gun_prefabs[g];
+    }
+    return null;
+}
+window.gunPrefabById = gunPrefabById;
+
 
 // --- legacy global bridge ---------------------------------------------------
 // This file used to be a classic <script> whose top-level declarations landed on

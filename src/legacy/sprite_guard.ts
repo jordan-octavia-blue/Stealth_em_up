@@ -57,6 +57,13 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         this.patrolRouteIndex = -1;
         this.patrolLeg = 0;
 
+        //Phase 10 (map editor): per-guard patrol behaviour + the "bank manager" flag. The map
+        //loader/spawn code overwrites these from the guard's entry; the defaults here match a
+        //legacy guard (random wander, ordinary guard). `behavior` is read by
+        //getRandomPatrolPath below; `isBankManager` is checked in kill() to hand over the key.
+        this.behavior = { kind: 'random' };
+        this.isBankManager = false;
+
         //Add all sprites to sprite container
         this.feet_clip = jo_movie_clip("movie_clips/","feet_",8,".png")
         this.feet_clip.anchor.x = 0.5;
@@ -98,6 +105,13 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
             //play_sound(sound_unit_die);
             this.sprite_body.texture = (img_guard_dead);
             this.alive = false;
+            //Phase 10 (map editor): downing the bank manager (shot or choked out — both reach
+            //here) hands the hero the vault key, so a vault door then opens on approach without
+            //the long lockpick.
+            if(this.isBankManager && hero && !hero.hasVaultKey){
+                hero.hasVaultKey = true;
+                newFloatingMessage("Got the vault key!", {x: hero.x, y: hero.y}, "#f1c40f");
+            }
             //A corpse is a prop to be dragged, not an obstacle: drop the body out of the
             //physics world so the drag code can move it directly and the living can walk
             //over it, exactly as they did before Phase 4.
@@ -143,9 +157,22 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
             //queue a patrol path. The search itself runs inside nav, under the
             //scheduler's per-frame budget — this call never performs one.
 
+            //Phase 10 (map editor): honour the guard's authored patrol behaviour.
+            //  'stay'    — hold post: never queue a patrol path (combat/alarm is unaffected).
+            //  'random'  — always region-safe random wander, ignoring named routes.
+            //  'route'   — walk the assigned named route (via squad.patrolPathFor).
+            //  (default) — legacy: routes if the map has them, else wander.
+            var behaviorKind = (this.behavior && this.behavior.kind) ? this.behavior.kind : null;
+            if(behaviorKind === 'stay'){
+                this.idling = true;
+                this.startedIdling = true;
+                this.patrolRetryAt = gameClock.now() + PATROL_MIN_INTERVAL_MS;
+                return;
+            }
             //Phase 6b: if the map defines named patrol routes, walk the one assigned to this
-            //guard instead of wandering. Falls through to region-safe random wander otherwise.
-            if(squad.patrolPathFor(this))return;
+            //guard instead of wandering. A 'random' guard skips this so it never picks up a
+            //route even on a map that defines them. Falls through to random wander otherwise.
+            if(behaviorKind !== 'random' && squad.patrolPathFor(this))return;
 
             //game time, not wall time: the backoff must not burn down while paused
             var now = gameClock.now();

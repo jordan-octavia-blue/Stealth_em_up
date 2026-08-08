@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MapData } from '../../src/map/loader';
+import { normalizeGuardEntry } from '../../src/map/guards';
 import {
   CELL,
   EditError,
@@ -208,6 +209,39 @@ describe('contractMap', () => {
       doorTypes: {},
     };
     expect(() => contractMap(tiny, 'E')).toThrow(/smaller/);
+  });
+});
+
+describe('editor → game data contract', () => {
+  it('carries door types and configured guards through the game loader (deserialize === loadMap)', () => {
+    const m = createEmptyMap(10, 8);
+    stampVaultDoor(m, 3, 4, 'horizontal'); // 3-wide vault
+    setDoor(m, 2, 2, 'vertical', 'reinforced');
+    (m.objects.guards as unknown[]) = [
+      {
+        pos: [200, 200],
+        weapon: 'pistol_silenced',
+        riotShield: true,
+        behavior: { kind: 'route', route: 'lobby' },
+        isBankManager: true,
+      },
+    ];
+    m.patrolRoutes = [{ name: 'lobby', points: [[100, 100], [200, 100]] }];
+
+    const loaded = deserialize(serialize(m)); // the exact path the game uses to load a map
+
+    // door metadata survives as the top-level doorTypes field
+    expect(loaded.doorTypes[flatIndex(10, 3, 4)].type).toBe('vault');
+    expect(loaded.doorTypes[flatIndex(10, 5, 4)].type).toBe('vault'); // 3rd cell of the run
+    expect(loaded.doorTypes[flatIndex(10, 2, 2)]).toEqual({ type: 'reinforced' });
+
+    // guard config survives inside objects.guards
+    const g = normalizeGuardEntry((loaded.objects.guards as unknown[])[0]);
+    expect(g.weapon).toBe('pistol_silenced');
+    expect(g.riotShield).toBe(true);
+    expect(g.isBankManager).toBe(true);
+    expect(g.behavior).toEqual({ kind: 'route', route: 'lobby' });
+    expect(loaded.patrolRoutes[0].name).toBe('lobby');
   });
 });
 
