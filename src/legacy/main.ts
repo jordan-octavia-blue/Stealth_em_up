@@ -239,7 +239,9 @@ window.bullets ??= undefined;
 
 			//make sprites
             window.hero ??= undefined;
+            window.heroes ??= undefined;//local + remote heroes; `hero` is always the local one
             window.hero_last_seen ??= undefined;
+            window.last_seen_active ??= undefined;//squad-level "hero was spotted this run" latch (set in setup_map)
             window.hero_end_aim_coord ??= undefined;
 
 			
