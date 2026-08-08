@@ -141,7 +141,18 @@ function jo_wall(image_number,solid,blocks_vision,restricted,vertices,grid_index
             //var sprite = new PIXI.Sprite(img_tile_red);
             var sprite = new PIXI.Sprite.fromImage(img_tile_red);
             break;
-            
+        case 5:
+            //Glass wall — there is no art for it, so draw a translucent bluish-white square
+            //filling the cell. Translucent on purpose: glass blocks movement but not sight,
+            //so you can see (and shoot) straight through it. A PIXI.Graphics is a display
+            //object like any sprite, so prepare_for_draw positions it the same way.
+            var sprite = new PIXI.Graphics();
+            sprite.beginFill(0xBFE4FF, 0.5);
+            sprite.lineStyle(2, 0xF0F8FF, 0.85);
+            sprite.drawRect(0, 0, 64, 64);
+            sprite.endFill();
+            break;
+
         }
         this.image_sprite = sprite;
         
