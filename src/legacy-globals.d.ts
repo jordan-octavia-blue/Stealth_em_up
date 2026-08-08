@@ -216,6 +216,11 @@ declare global {
   var heroes: any;
   var heroSpawnPoint: any;
   var spawnExtraHero: any;
+  // systems/mp.ts + systems/netplay.ts (multiplayer)
+  var netRole: any;
+  var mpSessionRoster: any;
+  var mpLocalPlayerId: any;
+  var mpTryStartMission: any;
   var hero_end_aim_coord: any;
   var hero_is_dead: any;
   var hero_last_seen: any;

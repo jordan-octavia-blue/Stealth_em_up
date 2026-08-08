@@ -129,6 +129,9 @@ function fullscreen() {
     ;
     // Temporarily disable full screen
     // rfs.call(el);
+    //Multiplayer: in a lobby, Start Game is a networked action (host broadcasts
+    //the mission start; guests wait). Returns true when multiplayer handled it.
+    if(window.mpTryStartMission && window.mpTryStartMission())return;
     startGame();
 }
 
@@ -656,21 +659,33 @@ function setup_map(map){
             //Multiplayer: `hero` always means "the local player's hero" on every
             //machine; `heroes` is every hero in the mission (local + remote).
             //Single-player is simply heroes = [hero].
-            hero.playerId = 0;
+            hero.playerId = (window.mpSessionRoster && typeof window.mpLocalPlayerId === 'number') ? window.mpLocalPlayerId : 0;
             hero.isLocal = true;
-            var heroSpawn = heroSpawnPoint(0, map.objects.hero[0], map.objects.hero[1]);
+            var heroSpawn = heroSpawnPoint(hero.playerId, map.objects.hero[0], map.objects.hero[1]);
             hero.x = heroSpawn.x;
             hero.y = heroSpawn.y;
             //dynamic circle, fixedRotation — facing stays a game-logic angle (§3.2)
             physics.addHero(hero, hero.radius);
 			hero.speed = hero.speed_walk;
             heroes = [hero];
-            //Debug drill (?players=N): spawn N-1 input-less dummy heroes so every
-            //multi-hero code path (guard targeting, per-hero drag, revive) can be
-            //exercised in single-player before any networking exists.
-            var debugPlayers = Math.min(Number(url_queryString["players"]) || 1, 4);
-            for(var p = 1; p < debugPlayers; p++){
-                heroes.push(spawnExtraHero(p, map.objects.hero[0], map.objects.hero[1]));
+            if(window.mpSessionRoster && mpSessionRoster.length > 1){
+                //Multiplayer: a hero for every OTHER player in the roster. On the
+                //host these are the replicas guards see and shoot; on a client they
+                //are the drawn teammates, positioned from snapshots.
+                for(var rp = 0; rp < mpSessionRoster.length; rp++){
+                    if(mpSessionRoster[rp].playerId === hero.playerId)continue;
+                    var remoteHero = spawnExtraHero(mpSessionRoster[rp].playerId, map.objects.hero[0], map.objects.hero[1]);
+                    remoteHero.setName(mpSessionRoster[rp].name);
+                    heroes.push(remoteHero);
+                }
+            }else{
+                //Debug drill (?players=N): spawn N-1 input-less dummy heroes so every
+                //multi-hero code path (guard targeting, per-hero drag, revive) can be
+                //exercised in single-player before any networking exists.
+                var debugPlayers = Math.min(Number(url_queryString["players"]) || 1, 4);
+                for(var p = 1; p < debugPlayers; p++){
+                    heroes.push(spawnExtraHero(p, map.objects.hero[0], map.objects.hero[1]));
+                }
             }
 
             
@@ -682,15 +697,20 @@ function setup_map(map){
             
             
 			guards = [];
-            for(var i = 0; i < map.objects.guards.length; i++){
-                var hasRiotShield = randomIntFromInterval(0,2);
-                var guard_img = hasRiotShield ? img_guard_riot_reg : img_guard_reg;
-                var guard_inst = new sprite_guard_wrapper(new PIXI.Sprite(guard_img),hasRiotShield);
-                guard_inst.x = map.objects.guards[i][0];
-                guard_inst.y = map.objects.guards[i][1];
-                physics.addGuard(guard_inst, guard_inst.radius);
-                guard_inst.getRandomPatrolPath();
-                guards.push(guard_inst);
+            //Guards belong to the authoritative world. A multiplayer client starts
+            //with none — replicas appear from the host's first snapshot (which also
+            //carries each guard's riot-shield roll, so the visuals can't diverge).
+            if(mpIsHost()){
+                for(var i = 0; i < map.objects.guards.length; i++){
+                    var hasRiotShield = randomIntFromInterval(0,2);
+                    var guard_img = hasRiotShield ? img_guard_riot_reg : img_guard_reg;
+                    var guard_inst = new sprite_guard_wrapper(new PIXI.Sprite(guard_img),hasRiotShield);
+                    guard_inst.x = map.objects.guards[i][0];
+                    guard_inst.y = map.objects.guards[i][1];
+                    physics.addGuard(guard_inst, guard_inst.radius);
+                    guard_inst.getRandomPatrolPath();
+                    guards.push(guard_inst);
+                }
             }
 
             guard_backup_spawn = {'x':map.objects.guard_backup_spawn[0],'y':map.objects.guard_backup_spawn[1]};
@@ -1900,34 +1920,37 @@ function unsilenced_gun(shooter){
 }
 
 
-function setHeroImage(){
-    if(hero.gunOut){
-        switch(hero.gun.name){
+function setHeroImageFor(h){
+    if(h.gunOut){
+        switch(h.gun.name){
             case "Shotgun":
-                hero.sprite_body.texture = (img_hero_with_shotty);
+                h.sprite_body.texture = (img_hero_with_shotty);
                 break;
             case "Sawed-Off Shotty":
-                hero.sprite_body.texture = (img_hero_with_shotty_sawed);
+                h.sprite_body.texture = (img_hero_with_shotty_sawed);
                 break;
             case "Handgun":
-                hero.sprite_body.texture = (img_hero_with_pistol);
+                h.sprite_body.texture = (img_hero_with_pistol);
                 break;
             case "Silenced Handgun":
-                hero.sprite_body.texture = (img_hero_with_pistol_silenced);
+                h.sprite_body.texture = (img_hero_with_pistol_silenced);
                 break;
             case "Machine Gun":
-                hero.sprite_body.texture = (img_hero_with_machine_gun);
+                h.sprite_body.texture = (img_hero_with_machine_gun);
                 break;
             default:
-                hero.imgMaskOn(true);
+                h.imgMaskOn(true);
                 break;
-            
+
         }
     }else{
-        hero.sprite_body.texture = (img_hero_body);
-        
+        h.sprite_body.texture = (img_hero_body);
+
     }
 
+}
+function setHeroImage(){
+    setHeroImageFor(hero);
 }
 function useMask(toggle){
     hero.masked = toggle;
@@ -2233,6 +2256,6 @@ function getMapInfo(subdir, fileName){
 // `window`. It is an ES module now, so the functions below are republished as
 // globals for the not-yet-extracted code that still reads them by bare name.
 // See src/legacy-bridge.ts. Each extraction deletes another line from here.
-Object.assign(window, { getColor, windowSetup, fullscreen, drawBloodTrail, bakeBloodTrail, getUrlVars, removeAllChildren, clearStage, startMenu, startGame, setup_map, animate, reactionTimeout, gameloop_guards, gameloop_security_cams, removeBullet, gameloop_bullets, gameloop_guard_visibility, gameloop_doors, gameloop_dragtarget, gameloop_messages_and_tooltip, gameloop_getawaycar_and_loot, gameloop_alert_animation, pickUpGunDrop, gameloop, updateDebugInfo, newMessage, newFloatingMessage, updateMessage, spawn_backup, spawn_individual_backup, alert_all_guards, unsilenced_gun, setHeroImage, useMask, hero_is_dead, doGunShotEffects, set_latestAlert, setBomb, gameloop_bomb, explodeBomb, plantBomb, drop_gun, killHero, getMapInfo, heroSpawnPoint, spawnExtraHero, isHeroUnit, pickSeenHero, learnFace, checkUnmaskSeen, enterCar, exitCar });
+Object.assign(window, { getColor, windowSetup, fullscreen, drawBloodTrail, bakeBloodTrail, getUrlVars, removeAllChildren, clearStage, startMenu, startGame, setup_map, animate, reactionTimeout, gameloop_guards, gameloop_security_cams, removeBullet, gameloop_bullets, gameloop_guard_visibility, gameloop_doors, gameloop_dragtarget, gameloop_messages_and_tooltip, gameloop_getawaycar_and_loot, gameloop_alert_animation, pickUpGunDrop, gameloop, updateDebugInfo, newMessage, newFloatingMessage, updateMessage, spawn_backup, spawn_individual_backup, alert_all_guards, unsilenced_gun, setHeroImage, setHeroImageFor, useMask, hero_is_dead, doGunShotEffects, set_latestAlert, setBomb, gameloop_bomb, explodeBomb, plantBomb, drop_gun, killHero, getMapInfo, heroSpawnPoint, spawnExtraHero, isHeroUnit, pickSeenHero, learnFace, checkUnmaskSeen, enterCar, exitCar });
 
 export {};
