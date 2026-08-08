@@ -187,14 +187,22 @@ export function addKeyHandlers(){
 
                         for(var i = 0; i < grid.doors.length; i++){
                             var door = grid.doors[i];
-                            if(door.solid && get_distance(hero.x,hero.y,door.x+grid.cell_size/2,door.y+grid.cell_size/2) <= hero.radius*5){
+                            //Phase 10: skip doors already unlocked (an `unlocked`-type door, or
+                            //one already picked) — there's nothing left to pick.
+                            if(door.solid && !grid.door_sprites[i].unlocked && get_distance(hero.x,hero.y,door.x+grid.cell_size/2,door.y+grid.cell_size/2) <= hero.radius*5){
                                 //if door isn't solid, then it is already unlocked.
                                 grid.a_door_is_being_unlocked = true;
 
-                                //timer
-                                var unlockTimeRemaining = hero.lockpick_speed;
+                                //timer — Phase 10: reinforced/vault doors carry their own
+                                //(longer) lockpick time; a plain door falls back to the hero's
+                                //speed. With the bank manager's key a vault opens instantly.
+                                var unlockTimeRemaining = door.lockpickMs || hero.lockpick_speed;
+                                if(door.doorType === 'vault' && hero.hasVaultKey){ unlockTimeRemaining = 0; }
                                 hero.lockpicking = true;
-                                circProgBar.reset(door.x+grid.cell_size/2,door.y+grid.cell_size/2,unlockTimeRemaining,grid.door_sprites[i].unlock.bind(grid.door_sprites[i]));
+                                //Phase 10: unlock the whole door group so a 3-wide vault opens as
+                                //one. For a normal door the group is just itself.
+                                var groupId = door.groupId;
+                                circProgBar.reset(door.x+grid.cell_size/2,door.y+grid.cell_size/2,unlockTimeRemaining,function(){ grid.unlockDoorGroup(groupId); });
                                 //cancel unlocking if hero moves away from door, unless hero has unlocked remote unlock
                                 if(!hero.ability_remote_lockpick)circProgBar.distanceCancelTarget = {x:door.x,y:door.y};
 
