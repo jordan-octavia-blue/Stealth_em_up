@@ -97,6 +97,25 @@ describe('buildOccluders', () => {
     expect(has(segments, CS, CS, 4 * CS, CS)).toBe(false);
   });
 
+  it('insets each wall face into the wall, leaving the map boundary untouched', () => {
+    const grid = gridFrom(['...', '.#.', '...']);
+    const inset = 20;
+    const all = buildOccluders(grid, inset);
+    const segments = interior(all, grid);
+    expect(segments).toHaveLength(4);
+    // Each face slides `inset` px perpendicular, off the wall's edge and into its body;
+    // its length along the run is unchanged.
+    expect(has(segments, CS, CS + inset, 2 * CS, CS + inset)).toBe(true); // top, slid south
+    expect(has(segments, CS, 2 * CS - inset, 2 * CS, 2 * CS - inset)).toBe(true); // bottom, slid north
+    expect(has(segments, CS + inset, CS, CS + inset, 2 * CS)).toBe(true); // left, slid east
+    expect(has(segments, 2 * CS - inset, CS, 2 * CS - inset, 2 * CS)).toBe(true); // right, slid west
+    // The four map-boundary segments are never inset.
+    const w = grid.width * CS;
+    const h = grid.height * CS;
+    expect(has(all, 0, 0, w, 0)).toBe(true);
+    expect(has(all, 0, h, 0, 0)).toBe(true);
+  });
+
   it('is derived from the live flags — clearing a cell removes its edges', () => {
     const grid = gridFrom(['...', '.#.', '...']);
     expect(interior(buildOccluders(grid), grid)).toHaveLength(4);
