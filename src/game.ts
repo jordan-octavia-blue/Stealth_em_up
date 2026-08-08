@@ -6,3 +6,7 @@
  * `legacy-bridge.ts` with real modules imported from here.
  */
 import './legacy-bridge';
+// Multiplayer wiring: no-op unless the page was opened with ?net=host / ?net=join
+// (dev two-tab mode) or launched inside the Steam build. Must come after the
+// legacy bridge so the window globals it reads exist.
+import './systems/netplay';

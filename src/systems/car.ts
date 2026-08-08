@@ -19,6 +19,7 @@
 import { gameClock } from '../core/clock';
 import { DEFAULT_CAR_TUNING, physics, PPM } from '../physics';
 import { bloodParticleSplatter } from './particles';
+import { isHost as mpIsHost, isClient as mpIsClient, mpAction } from './mp';
 
 // --- tuning -----------------------------------------------------------------
 
@@ -113,7 +114,20 @@ const CAR_CAM_SMOOTH = 0.12;
 
 /** The van sprite (an ActorOwner: has x, y, and a `sprite`/`rad`). Set by `initCar`. */
 let van: any = null;
-let active = false;
+/**
+ * Seats (multiplayer): who is driving and everyone aboard (driver included).
+ * Single-player is simply aboard = [hero]. The old boolean `active` is now
+ * "the LOCAL hero is aboard" — see isInCar().
+ */
+let driver: any = null;
+let aboard: any[] = [];
+/**
+ * HOST, remote driver: the streamed motion of the van. The mirrored body is
+ * teleported into place each update, so its own velocity reads ~0 — run-over
+ * lethality, dodge triggering and engine noise must use the driver's real
+ * numbers instead.
+ */
+let netMotion: { vx: number; vy: number; speed: number } | null = null;
 let lastNoiseAt = -Infinity;
 /** Bodywork left before the van is wrecked. Only counts down while it is being shot. */
 let carHealth = CAR_MAX_HEALTH;
@@ -200,7 +214,8 @@ function stopEngine(): void {
  */
 export function initCar(owner: any, angle: number): void {
   van = owner;
-  active = false;
+  driver = null;
+  aboard = [];
   carHealth = CAR_MAX_HEALTH;
   // Hide the mismatched van image; the physics-shaped outline stands in for it.
   if (owner.sprite) owner.sprite.visible = false;
@@ -272,65 +287,115 @@ export function resetCarSystem(): void {
   carOutline = null;
   frontWheels = [];
   van = null;
-  active = false;
+  driver = null;
+  aboard = [];
+  netMotion = null;
   carHealth = CAR_MAX_HEALTH;
   lastNoiseAt = -Infinity;
   knockbacks.length = 0;
 }
 
+/** Is the LOCAL player's hero aboard — the meaning `isInCar()` has always had. */
 export function isInCar(): boolean {
-  return active;
+  return aboard.indexOf(hero) !== -1;
+}
+
+/** Is this particular hero (local or teammate) aboard the van? */
+export function isHeroInCar(h: any): boolean {
+  return aboard.indexOf(h) !== -1;
+}
+
+/** Anyone at all aboard? (Guard bullets can hit the van only while it's occupied.) */
+export function isVanOccupied(): boolean {
+  return aboard.length > 0;
+}
+
+/** The hero in the driver's seat, or null when the van is parked/empty. */
+export function vanDriver(): any {
+  return driver;
+}
+
+/** Netplay: the host records the remote driver's streamed motion here. */
+export function setNetVanMotion(vx: number, vy: number, speed: number): void {
+  netMotion = { vx, vy, speed };
+}
+
+/** Netplay: force the driver's seat (snapshot reconciliation on clients). */
+export function setNetDriver(h: any): void {
+  driver = h;
+}
+
+/** The motion numbers gameplay should trust for this van right now. */
+function effectiveMotion(st: { vx: number; vy: number; speed: number }): {
+  vx: number;
+  vy: number;
+  speed: number;
+} {
+  if (netMotion && driver && driver !== hero && mpIsHost()) return netMotion;
+  return st;
+}
+
+/** Netplay: a remote driver reported ramming this wall cell at this speed. */
+export function applyNetBreach(cell: number, speed: number): void {
+  if (cell < 0 || speed < BREACH_SPEED_PX) return;
+  const amount = Math.min(speed * BREACH_DAMAGE_PER_SPEED, BREACH_DAMAGE_MAX);
+  grid.damageCell(cell, amount, 'car');
 }
 
 // --- enter / exit -----------------------------------------------------------
 
-/** The interact key (E): climb in if next to the van, climb out if already driving. */
+/** The interact key (E): climb in if next to the van, climb out if already aboard. */
 export function toggleCar(): void {
   if (!van) return;
-  if (active) {
-    exitCar();
+  if (isInCar()) {
+    exitCar(hero);
   } else {
     if (!hero.alive) return;
-    if (get_distance(hero.x, hero.y, van.x, van.y) <= ENTER_DISTANCE_PX) enterCar();
+    if (get_distance(hero.x, hero.y, van.x, van.y) <= ENTER_DISTANCE_PX) enterCar(hero);
     else newFloatingMessage('Get closer to the van', { x: hero.x, y: hero.y }, '#FFaa00');
   }
 }
 
-function enterCar(): void {
-  active = true;
-  hero.inCar = true;
+/** Put a hero (local or teammate) into the van. First aboard takes the wheel. */
+export function enterCar(h: any): void {
+  if (aboard.indexOf(h) !== -1) return;
+  aboard.push(h);
+  if (!driver) driver = h;
+  h.inCar = true;
   // Put the gun away and take the hero body out of the world; the hero rides inside the van.
-  hero.gunOut = false;
-  if (typeof setHeroImage === 'function') setHeroImage();
-  physics.removeActor(hero);
-  hero.sprite.visible = false;
+  h.gunOut = false;
+  if (h === hero && typeof setHeroImage === 'function') setHeroImage();
+  physics.removeActor(h);
+  h.sprite.visible = false;
   // The hero now *is* the van as far as everyone else is concerned.
-  hero.x = van.x;
-  hero.y = van.y;
+  h.x = van.x;
+  h.y = van.y;
 
-  startEngine();
-
-  // Getting into the van is NOT a crime: it raises no alarm and no suspicion on its own.
-  // A guard only reacts to the van if the hero is *doing* something suspicious in it
-  // (masked, holding loot, etc. — see hero.willCauseAlert), or once the van is driven fast
-  // enough to be heard (the engine-noise broadcast in updateCarPreStep pulls already-alarmed
-  // guards toward it, but never alarms a calm one).
-  const msg = hero.carry
-    ? "You're in the van with the loot — drive to the escape zone!"
-    : "You're in the van! (E to get out)";
-  newMessage(msg);
+  if (h === hero) {
+    startEngine();
+    // Getting into the van is NOT a crime: it raises no alarm and no suspicion on its own.
+    // A guard only reacts to the van if the hero is *doing* something suspicious in it
+    // (masked, holding loot, etc. — see hero.willCauseAlert), or once the van is driven fast
+    // enough to be heard (the engine-noise broadcast in updateCarPreStep pulls already-alarmed
+    // guards toward it, but never alarms a calm one).
+    const seat = driver === hero ? "You're driving!" : 'You ride shotgun.';
+    const msg = hero.carry
+      ? "You're in the van with the loot — drive to the escape zone!"
+      : "You're in the van! " + seat + ' (E to get out)';
+    newMessage(msg);
+  }
 }
 
-/** Points to try dropping the hero, in order: both sides of the van, then behind, then front. */
-function exitCandidates(): Array<{ x: number; y: number }> {
+/** Points to try dropping a hero, in order: both sides of the van, then behind, then front. */
+function exitCandidates(radius: number): Array<{ x: number; y: number }> {
   const st = physics.getCarState(van);
   const angle = st ? st.angle : van.rad - CAR_ART_OFFSET;
   const fx = Math.cos(angle);
   const fy = Math.sin(angle);
   const px = -fy; // left normal
   const py = fx;
-  const side = CAR_WIDTH_PX / 2 + hero.radius + 6;
-  const ends = CAR_LENGTH_PX / 2 + hero.radius + 6;
+  const side = CAR_WIDTH_PX / 2 + radius + 6;
+  const ends = CAR_LENGTH_PX / 2 + radius + 6;
   return [
     { x: van.x + px * side, y: van.y + py * side },
     { x: van.x - px * side, y: van.y - py * side },
@@ -339,22 +404,28 @@ function exitCandidates(): Array<{ x: number; y: number }> {
   ];
 }
 
-function exitCar(): void {
-  const spot = exitCandidates().find((s) => physics.spotClearForActor(s.x, s.y, hero.radius));
+/** Take a hero out of the van at the first clear spot beside it. */
+export function exitCar(h: any): void {
+  if (aboard.indexOf(h) === -1) return;
+  const spot = exitCandidates(h.radius).find((s) =>
+    physics.spotClearForActor(s.x, s.y, h.radius),
+  );
   if (!spot) {
-    newFloatingMessage('No room to get out!', { x: van.x, y: van.y }, '#FFaa00');
+    if (h === hero) newFloatingMessage('No room to get out!', { x: van.x, y: van.y }, '#FFaa00');
     return;
   }
-  active = false;
-  hero.inCar = false;
-  stopEngine();
-  hero.x = spot.x;
-  hero.y = spot.y;
-  physics.addHero(hero, hero.radius);
-  physics.teleport(hero, spot.x, spot.y);
-  hero.sprite.visible = true;
-  hero.moving = true;
-  newMessage('Out of the van.');
+  aboard = aboard.filter((u) => u !== h);
+  // The driver's seat empties when the driver leaves; the next entrant claims it.
+  if (driver === h) driver = null;
+  h.inCar = false;
+  if (h === hero) stopEngine();
+  h.x = spot.x;
+  h.y = spot.y;
+  physics.addHero(h, h.radius);
+  physics.teleport(h, spot.x, spot.y);
+  h.sprite.visible = true;
+  h.moving = true;
+  if (h === hero) newMessage('Out of the van.');
 }
 
 // --- taking fire ------------------------------------------------------------
@@ -370,7 +441,7 @@ function exitCar(): void {
  * from the bullet loop in main.ts; a no-op unless the hero is actually in the van.
  */
 export function carHitByBullet(fromX: number, fromY: number): void {
-  if (!active || !van || !hero.alive) return;
+  if (!van || aboard.length === 0) return;
 
   if (Math.random() < DRIVER_HIT_CHANCE) {
     killDriver(fromX, fromY, 'The driver is hit!');
@@ -385,17 +456,20 @@ export function carHitByBullet(fromX: number, fromY: number): void {
   newFloatingMessage('Van hit! (' + carHealth + ')', { x: van.x, y: van.y }, '#FFaa00');
 }
 
-/** End the drive with the hero dead at the wheel: cut the engine, show the body, game over. */
+/** End the drive with the victim dead at the wheel: cut the engine, show the body. */
 function killDriver(fromX: number, fromY: number, reason: string): void {
-  active = false;
-  hero.inCar = false;
-  stopEngine();
+  const victim = driver || aboard[0];
+  if (!victim || !victim.alive) return;
+  aboard = aboard.filter((u) => u !== victim);
+  if (driver === victim) driver = null;
+  victim.inCar = false;
+  if (victim === hero) stopEngine();
   // Bring the (now to-be-dead) hero back into view slumped where the van stopped.
-  hero.x = van.x;
-  hero.y = van.y;
-  hero.sprite.visible = true;
+  victim.x = van.x;
+  victim.y = van.y;
+  victim.sprite.visible = true;
   newFloatingMessage(reason, { x: van.x, y: van.y }, '#cc0000');
-  if (typeof killHero === 'function') killHero(fromX, fromY);
+  if (typeof killHero === 'function') killHero(victim, fromX, fromY);
 }
 
 // --- per-step (before the physics step) -------------------------------------
@@ -405,31 +479,42 @@ function killDriver(fromX: number, fromY: number, reason: string): void {
  * drive force lands this step and the guards see the threat this step.
  */
 export function updateCarPreStep(): void {
-  if (!van || !active) return;
+  if (!van || aboard.length === 0) return;
 
-  physics.driveCar(van, {
-    throttle: keys.w ? 1 : keys.s ? -1 : 0,
-    steer: keys.d ? 1 : keys.a ? -1 : 0,
-    handbrake: !!keys.space,
-  });
+  // Only the driver's own machine reads pedals into the body — and only when the
+  // LOCAL hero is the driver. (A remote driver's van arrives over the network.)
+  if (driver === hero) {
+    physics.driveCar(van, {
+      throttle: keys.w ? 1 : keys.s ? -1 : 0,
+      steer: keys.d ? 1 : keys.a ? -1 : 0,
+      handbrake: !!keys.space,
+    });
+  }
 
   const st = physics.getCarState(van);
   if (!st) return;
 
-  // Keep the hero pinned to the van so guard vision, gunfire and last-seen all target it.
-  hero.x = st.x;
-  hero.y = st.y;
-
-  // Engine noise: while moving fast, re-broadcast the van's position so guards converge on it.
-  if (st.speed >= NOISE_MIN_SPEED_PX) {
-    const now = gameClock.now();
-    if (now - lastNoiseAt >= NOISE_INTERVAL_MS) {
-      lastNoiseAt = now;
-      hero.setLastSeen(null);
-    }
+  // Keep every rider pinned to the van so guard vision, gunfire and last-seen target it.
+  for (const rider of aboard) {
+    rider.x = st.x;
+    rider.y = st.y;
   }
 
-  triggerDodges(st);
+  // Engine noise and guard dodges are world simulation — host only. With a remote
+  // driver, the mirrored body's velocity is meaningless; use the streamed motion.
+  if (mpIsHost()) {
+    const motion = effectiveMotion(st);
+    // Engine noise: while moving fast, re-broadcast the van's position so guards converge on it.
+    if (driver && motion.speed >= NOISE_MIN_SPEED_PX) {
+      const now = gameClock.now();
+      if (now - lastNoiseAt >= NOISE_INTERVAL_MS) {
+        lastNoiseAt = now;
+        driver.setLastSeen(null);
+      }
+    }
+
+    triggerDodges({ x: st.x, y: st.y, vx: motion.vx, vy: motion.vy, speed: motion.speed });
+  }
 }
 
 /** Send guards standing in the van's path into a short perpendicular dodge. */
@@ -478,9 +563,11 @@ export function updateCarPostStep(dtMs: number): void {
     van.y = st.y;
     van.rad = st.angle + CAR_ART_OFFSET;
     syncCarOutline(st.x, st.y, st.angle, st.steer);
-    if (active) {
-      hero.x = st.x;
-      hero.y = st.y;
+    for (const rider of aboard) {
+      rider.x = st.x;
+      rider.y = st.y;
+    }
+    if (isInCar()) {
       const ratio = Math.min(st.speed / CAR_MAX_SPEED_PX, 1);
       updateEngine(ratio);
       camLead.x += (st.x + st.vx * CAR_LOOKAHEAD_S - camLead.x) * CAR_CAM_SMOOTH;
@@ -488,7 +575,21 @@ export function updateCarPostStep(dtMs: number): void {
     }
   }
 
-  resolveCarContacts(st);
+  // Run-overs and wall breaches are world state — host adjudicates. The driving
+  // CLIENT is the only machine whose van body really collides with walls, so it
+  // reports its own ramming impacts up to the host as requests.
+  if (mpIsHost()) {
+    resolveCarContacts(st);
+  } else {
+    const contacts = physics.drainCarContacts();
+    if (driver === hero && mpIsClient()) {
+      for (const c of contacts) {
+        if (c.kind === 'cell' && c.cell >= 0 && c.speed >= BREACH_SPEED_PX) {
+          mpAction('van_breach', { cell: c.cell, speed: c.speed }, () => {});
+        }
+      }
+    }
+  }
   advanceKnockbacks(dtMs);
 }
 
@@ -497,17 +598,18 @@ function resolveCarContacts(st: { vx: number; vy: number; speed: number } | null
   // Lethality is gated on the van's own driving speed, not the closing speed: a stationary
   // van can never run anyone over, however fast they walk into it — the collision just
   // shoves them (Box2D does that on its own). Only a van driving above the threshold kills.
-  const driving = st ? st.speed : 0;
+  const motion = st ? effectiveMotion(st) : null;
+  const driving = motion ? motion.speed : 0;
   for (const c of contacts) {
     if (c.kind === 'actor' && c.owner) {
       const unit = c.owner as any;
-      if (unit.alive && driving >= RUN_OVER_SPEED_PX) runOver(unit, st);
+      if (unit.alive && driving >= RUN_OVER_SPEED_PX) runOver(unit, motion);
     } else if (c.kind === 'cell' && c.cell >= 0 && c.speed >= BREACH_SPEED_PX) {
       // A hard hit on a wall is a suspicious act whether or not the wall gives: ramming
       // concrete that shrugs it off is just as much a scene as smashing through drywall.
       // Only while a driver is at the wheel — a bystander shoving the parked van isn't
       // the hero's crime.
-      if (active) hero.markVanSuspicious(VAN_SUSPICION_MS);
+      if (driver) driver.markVanSuspicious(VAN_SUSPICION_MS);
       // damageCell filters by material: drywall and brick take car damage, concrete and
       // steel (and the map border) shrug it off. The amount is capped low (see
       // BREACH_DAMAGE_MAX) so one impact damages a solid wall but never destroys it.
@@ -524,7 +626,7 @@ function runOver(guard: any, st: { vx: number; vy: number; speed: number } | nul
   // Mowing a guard down is a suspicious act: any other guard or camera that sees the van
   // during the window alarms (and, unmasked, learns the driver's face). The fresh corpse
   // is its own alarm source too, but this makes the deed itself count, not just the body.
-  if (active) hero.markVanSuspicious(VAN_SUSPICION_MS);
+  if (driver) driver.markVanSuspicious(VAN_SUSPICION_MS);
   bloodParticleSplatter(Math.atan2(dirY, dirX), guard);
   guard.kill();
   knockbacks.push({
@@ -552,9 +654,9 @@ function advanceKnockbacks(dtMs: number): void {
 
 // --- camera hook ------------------------------------------------------------
 
-/** Where the camera should aim while driving (velocity-led, smoothed), or null on foot. */
+/** Where the camera should aim while riding (velocity-led, smoothed), or null on foot. */
 export function carCameraTarget(): { x: number; y: number } | null {
-  return active ? camLead : null;
+  return isInCar() ? camLead : null;
 }
 
 /** The zoom-out factor to apply in car mode (roadmap §7: ~1.3× wider view). */

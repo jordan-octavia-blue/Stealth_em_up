@@ -152,3 +152,20 @@ then a short fuse runs, then its effect fires. All of this lives in `src/systems
 - `src/physics/world.ts` — `addVisionBlocker`/`removeVisionBlocker` (smoke) and the ray
   filter that lets a `VISION_BLOCKER` sensor stop sight.
 - `src/systems/input.ts` — key handlers that set the suspicion flags and throw grenades.
+
+## Multiplayer (co-op, 2–4 players)
+
+Host-authoritative over Steam classic P2P: the lobby owner's machine runs the
+real simulation (guards, alarms, doors, damage — `isHost()` in
+`src/systems/mp.ts` is TRUE in single-player, so host-gated code is just
+"today's code"); each machine fully simulates only its own hero and streams its
+state ~30Hz; the host broadcasts world snapshots ~20Hz which clients render
+interpolated ~130ms in the past. World-mutating interactions go through
+`mpAction()` (host runs directly, clients send a validated request). The van's
+physics runs on whoever drives it. Key files: `src/net/` (transport/protocol/
+session — pure, strict, tested), `src/systems/netplay.ts` (replication +
+lifecycle), `src/systems/mp.ts` (the role seam). `hero` is always the LOCAL
+player's hero; `heroes` is everyone. Dev testing: two browser tabs with
+`?net=host` / `?net=join&room=x` (plus `?netlag/?netjitter/?netloss`), or
+`?players=N` for input-less dummy heroes with no networking at all. Steam
+builds need the shell changes in `docs/steam-shell-fork.md`.

@@ -31,8 +31,13 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         this.ammo = 6;
         this.sawHeroLastAt = {x:null,y:null};
         this.accuracy = 50;
-        this.knowsHerosFace = false;//if guard knows hero's face, mask becomes irrelevant
+        this.knowsHerosFace = false;//legacy "knows anyone's face" — kept because the alert textures key off it
+        //Multiplayer: faces are remembered per player (keyed by playerId). knowsHerosFace
+        //above stays the "knows at least one face" rollup so texture code doesn't change.
+        this.knowsFaceOf = {};
         this.currentlySeesHero = false;//updated every loop;
+        this.seenHero = null;//which hero this guard is reacting to this tick (multi-hero)
+        this.dragged_by = null;//which hero is dragging/choking this guard — claims ownership so two players can't grab one guard
         this.gun_shot_line.graphics.visible = false;
         this.hasRiotShield = hasRiotShield;
         this.reactionTimeMillis = 500;
@@ -226,7 +231,9 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
                     gameClock.after(2000, function(){
                         if(this.alive && !this.being_choked_out){
                             newMessage('All the other guards are on alert!');
-                            alert_all_guards();
+                            //the radius is centred on the guard who saw something,
+                            //not on any particular hero
+                            alert_all_guards(this);
                         };
                     }.bind(this));
                 })

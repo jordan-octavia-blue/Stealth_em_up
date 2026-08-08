@@ -48,8 +48,9 @@ function jo_gun(name,clip_size, silenced, automatic, bullets_per_shot, spread){
     }
     //unit is the unit doing the shooting:
     this.shoot = function(unit){
+        var spawned = [];
         for(var b = 0; b < this.bullets_per_shot; b++){
-            
+
             //make bullet (all assets in main.js):
             var bullet = new jo_sprite(new PIXI.Sprite(img_bullet));
             bullet.ignore = unit;//don't kill the shooter with own bullet
@@ -80,13 +81,17 @@ function jo_gun(name,clip_size, silenced, automatic, bullets_per_shot, spread){
             //bullet.speed = 10;//slow motion bullets!
             bullet.stop_distance = bullet.speed;
             bullets.push(bullet);
-            
+            spawned.push({tx:bullet.target.x, ty:bullet.target.y, speed:bullet.speed});
+
             //end make bullet
-            
-            
+
+
             unit.rotate_to_instant(bullet.target.x,bullet.target.y);
         }
-    
+        //multiplayer: the host tells the other machines about this trigger pull so
+        //they can draw the tracers and hear the shot (no-op otherwise)
+        if(window.mpOnShotFired)mpOnShotFired(unit, this, spawned);
+
     }
    
 }

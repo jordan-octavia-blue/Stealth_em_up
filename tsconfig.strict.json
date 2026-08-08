@@ -20,6 +20,7 @@
   "include": [
     "src/core",
     "src/nav",
+    "src/net",
     "src/ai",
     "src/physics",
     "src/fog",
@@ -27,6 +28,7 @@
     "src/render/autotile.ts",
     "test/core",
     "test/nav",
+    "test/net",
     "test/ai",
     "test/physics",
     "test/fog",
