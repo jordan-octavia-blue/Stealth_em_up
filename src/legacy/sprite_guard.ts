@@ -17,6 +17,10 @@ function sprite_guard_wrapper(pixiSprite, hasRiotShield){
         //gameClock time (ms) until which this guard is diving clear of the van (Phase 7).
         //While it holds, the guard ignores its normal AI and runs to `target`.
         this.dodgeUntil = 0;
+        //gameClock time (ms) until which this guard is stunned from being run into by a
+        //sprinting hero (src/systems/melee.ts). While it holds, the guard skips its AI and
+        //coasts on the decaying knockback velocity instead of steering.
+        this.stunnedUntil = 0;
         this.blood_trail;
         this.blood_trail_size = 10;
         this.blood_trail_skip_frequency = 1.5;

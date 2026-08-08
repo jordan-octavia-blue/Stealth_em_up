@@ -9,6 +9,7 @@ window.tile_container_white ??= undefined;
 window.tile_container_brown ??= undefined;
 window.tile_container_red ??= undefined;
 window.tile_container_purple ??= undefined;
+window.tile_container_glass ??= undefined;
 window.tile_containers ??= undefined;
 
 function jo_grid(map){
@@ -24,7 +25,10 @@ function jo_grid(map){
     tile_container_brown = new PIXI.Container();
     tile_container_red = new PIXI.Container();
     tile_container_purple = new PIXI.Container();
-    tile_containers = [tile_container_black,tile_container_white,tile_container_brown,tile_container_red,tile_container_purple];
+    //Glass walls (image_number 5) get their own container: they are drawn as a translucent
+    //bluish-white square in jo_wall.changeImage since there is no art for them yet.
+    tile_container_glass = new PIXI.Container();
+    tile_containers = [tile_container_black,tile_container_white,tile_container_brown,tile_container_red,tile_container_purple,tile_container_glass];
 
     //Debug lines for shortcut pathing
     /*
@@ -307,6 +311,13 @@ function jo_grid(map){
             door.door = true;
             this.cells.push(door);
             this.make_door(door, true);
+            break;
+        case 7:
+            //glass wall: solid (blocks_vision false) so it stops movement but not sight or
+            //gunfire. image_number 5 draws the translucent bluish-white square. It carries
+            //hp from the tileset like any wall and, once shot/bombed/rammed enough, breaks
+            //into a walkable gap.
+            this.cells.push(new jo_wall(5,true,false,false,this.getWallCoords('square',x_index,y_index),x_index,y_index));
             break;
         default:
             console.log('here');
