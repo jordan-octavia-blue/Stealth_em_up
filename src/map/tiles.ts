@@ -137,7 +137,7 @@ export const TILE_TYPES: TileType[] = [
     imageNumber: 1,
     paletteGroup: 'Floors',
     swatch: '#e8e8e8',
-    hint: 'Walkable public floor.',
+    hint: 'Walkable floor. Drag over walls, desks or glass to clear them back to floor (spares doors).',
     editorDraw: { kind: 'image', file: 'tile_white' },
   },
   {
@@ -190,6 +190,18 @@ const BY_CODE: Map<number, TileType> = new Map(TILE_TYPES.map((t) => [t.code, t]
 /** The tile for a code, or `undefined` for a code not in the catalog (an unknown/legacy tile). */
 export function tileType(code: number): TileType | undefined {
   return BY_CODE.get(code);
+}
+
+/**
+ * Is `code` a "wall" for the editor's Floor brush — a solid tile that is not a door (wall,
+ * desk or glass)? Painting the Floor tile clears any of these back to floor. Doors are solid
+ * too but are excluded: they carry their own metadata and are placed/removed with the door and
+ * Erase tools, so the Floor brush leaves them alone. Plain and restricted floor aren't solid,
+ * so they're left alone as well.
+ */
+export function isWallTile(code: number): boolean {
+  const t = tileType(code);
+  return t !== undefined && t.solid && !t.door;
 }
 
 function codeOf(id: string): number {

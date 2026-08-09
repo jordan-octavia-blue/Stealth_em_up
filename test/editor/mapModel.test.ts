@@ -65,21 +65,30 @@ describe('setTile', () => {
     expect(m.data[flatIndex(8, 0, 3)]).toBe(TILE.wall);
   });
 
-  it('painting floor only overwrites walls — it leaves doors and desks intact', () => {
+  it('painting floor clears any wall-like tile (wall, desk, glass) back to floor', () => {
     const m = createEmptyMap(8, 8);
-    // a door: dragging floor over it must NOT delete the door
+    for (const [x, y, wallLike] of [
+      [3, 3, TILE.wall],
+      [4, 4, TILE.desk],
+      [5, 5, TILE.glass],
+    ] as const) {
+      setTile(m, x, y, wallLike);
+      setTile(m, x, y, TILE.floor);
+      expect(m.data[flatIndex(8, x, y)]).toBe(TILE.floor);
+    }
+  });
+
+  it('painting floor spares doors and restricted floor', () => {
+    const m = createEmptyMap(8, 8);
+    // a door: dragging floor over it must NOT delete the door or its type
     setDoor(m, 3, 3, 'vertical', 'locked');
     setTile(m, 3, 3, TILE.floor);
     expect(m.data[flatIndex(8, 3, 3)]).toBe(TILE.doorVertical);
     expect(m.doorTypes[flatIndex(8, 3, 3)]).toEqual({ type: 'locked' });
-    // a desk: likewise preserved
-    setTile(m, 4, 4, TILE.desk);
+    // restricted floor is a floor, not a wall, so the Floor brush leaves it be
+    setTile(m, 4, 4, TILE.restricted);
     setTile(m, 4, 4, TILE.floor);
-    expect(m.data[flatIndex(8, 4, 4)]).toBe(TILE.desk);
-    // a wall: floor DOES clear it
-    setTile(m, 5, 5, TILE.wall);
-    setTile(m, 5, 5, TILE.floor);
-    expect(m.data[flatIndex(8, 5, 5)]).toBe(TILE.floor);
+    expect(m.data[flatIndex(8, 4, 4)]).toBe(TILE.restricted);
   });
 
   it('painting a non-floor tile over a door still clears the door metadata', () => {

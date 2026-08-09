@@ -4,6 +4,7 @@ import {
   TILE_TYPES,
   editorTileFile,
   editorTileFiles,
+  isWallTile,
   paintableTiles,
   tileType,
 } from '../../src/map/tiles';
@@ -75,6 +76,25 @@ describe('paintableTiles (what the editor palette generates)', () => {
   it('groups walls before floors', () => {
     const groups = paintableTiles().map((t) => t.paletteGroup);
     expect(groups.indexOf('Walls')).toBeLessThan(groups.indexOf('Floors'));
+  });
+});
+
+describe('isWallTile (what the Floor brush clears)', () => {
+  it('is true for the solid, non-door tiles — wall, desk, glass', () => {
+    expect(isWallTile(TILE.wall)).toBe(true);
+    expect(isWallTile(TILE.desk)).toBe(true);
+    expect(isWallTile(TILE.glass)).toBe(true);
+  });
+
+  it('is false for floors and doors (the Floor brush leaves them alone)', () => {
+    expect(isWallTile(TILE.floor)).toBe(false);
+    expect(isWallTile(TILE.restricted)).toBe(false);
+    expect(isWallTile(TILE.doorVertical)).toBe(false);
+    expect(isWallTile(TILE.doorHorizontal)).toBe(false);
+  });
+
+  it('is false for an unknown tile code', () => {
+    expect(isWallTile(999)).toBe(false);
   });
 });
 

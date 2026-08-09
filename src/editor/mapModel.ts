@@ -16,7 +16,7 @@
 
 import { CURRENT_MAP_VERSION, type MapData, loadMap } from '../map/loader';
 import { DOOR_TYPE_DEFAULTS, type DoorSpec, type DoorType } from '../map/doors';
-import { TILE } from '../map/tiles';
+import { TILE, isWallTile } from '../map/tiles';
 
 /** Pixels per cell — the game's fixed grid size. */
 export const CELL = 64;
@@ -122,10 +122,12 @@ export function createEmptyMap(width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT): 
  * Paint a single cell with a palette tile. Cells on the outer ring are left as wall (the game
  * forces the border indestructible), so a paint there is ignored.
  *
- * The Floor tile is deliberately special: it only paints over wall cells. Dragging floor
- * across a door, desk, glass or existing floor leaves that cell untouched, so you can fill in
- * a room's floor without wiping out the doors and furniture inside it. To clear any cell (a
- * door included) back to plain floor, use {@link clearTile} — that is what the Erase tool does.
+ * The Floor tile is deliberately special: it is a "clear the walls" brush. It paints over any
+ * wall tile — a plain wall, a desk or a glass wall (see {@link isWallTile}) — turning it back
+ * to floor, but leaves doors and existing floor (plain or restricted) untouched. So you can
+ * drag floor across a room to knock out its walls, desks and glass without wiping the doors or
+ * restricted zones inside it. To clear a door (or a restricted-floor cell) back to plain floor,
+ * use {@link clearTile} — that is what the Erase tool does.
  *
  * Painting any *non-floor* tile over a door still clears that cell's door metadata: you are
  * deliberately replacing the door with a wall/desk/etc.
@@ -134,9 +136,10 @@ export function setTile(map: MapData, x: number, y: number, code: number): void 
   if (x < 0 || y < 0 || x >= map.width || y >= map.height) return;
   if (isBorder(x, y, map.width, map.height)) return; // border stays indestructible wall
   const idx = flatIndex(map.width, x, y);
-  // Floor is a "clear the wall" brush: it only overwrites walls, so it never deletes a door,
-  // desk, glass tile or restricted floor it is dragged across (use clearTile / Erase for that).
-  if (code === TILE.floor && map.data[idx] !== TILE.wall) return;
+  // Floor is a "clear the walls" brush: it only overwrites wall-like tiles (wall, desk, glass),
+  // so it never deletes a door or restricted floor it is dragged across (use clearTile / Erase
+  // for that).
+  if (code === TILE.floor && !isWallTile(map.data[idx])) return;
   map.data[idx] = code;
   const isDoor = code === TILE.doorVertical || code === TILE.doorHorizontal;
   if (!isDoor && map.doorTypes[idx]) delete map.doorTypes[idx];
@@ -145,9 +148,9 @@ export function setTile(map: MapData, x: number, y: number, code: number): void 
 
 /**
  * Erase a cell back to plain floor, dropping any door or hp metadata — the editor's Erase
- * action. Unlike painting the Floor tile (which only overwrites walls), this clears whatever
- * is in the cell: a door, desk, glass or restricted floor. The indestructible border is left
- * as wall.
+ * action. Unlike painting the Floor tile (which clears only wall-like tiles — wall, desk,
+ * glass), this clears whatever is in the cell, doors and restricted floor included. The
+ * indestructible border is left as wall.
  */
 export function clearTile(map: MapData, x: number, y: number): void {
   if (x < 0 || y < 0 || x >= map.width || y >= map.height) return;
