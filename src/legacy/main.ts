@@ -43,9 +43,10 @@ window.stage ??= undefined;
 window.window_properties ??= undefined;
 window.renderer ??= undefined;
 window.mouse_relative = {x:0,y:0};
-//Phase 4b: fog of war is back on. It was switched off years before the roadmap and the
-//starburst behind it could not have been usefully switched back on — see src/render/fog.ts.
-window.enableLOS = true;
+//Fog of war (the dark "line of sight" shade over everything the hero can't see) is off.
+//With it off, src/render/fog.ts draws nothing and every guard is drawn wherever it is,
+//seen or not. Set this back to true to bring the shade (and the guard hiding) back.
+window.enableLOS = false;
 
 window.wabbitTexture = new PIXI.Texture.fromImage("../images/shell.png");
 window.particle_container ??= undefined;	

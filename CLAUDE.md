@@ -110,7 +110,8 @@ then a short fuse runs, then its effect fires. All of this lives in `src/systems
 - **Smoke** touches the *two separate vision systems* in this codebase. For guards and
   cameras (which see via physics raycasts) it adds `VISION_BLOCKER` sensor circles through
   `physics.addVisionBlocker` — the ray filter now lets a `VISION_BLOCKER` sensor stop sight
-  and gunfire. For the player's fog-of-war (built from the grid's `blocks_vision` flags, not
+  and gunfire. For the player's fog-of-war (currently switched off — `window.enableLOS = false` in
+  `src/legacy/main.ts`; built from the grid's `blocks_vision` flags, not
   physics) it flags the covered cells `blocks_vision` and emits `vision:dirty` to rebuild the
   occluders. Both are undone when the cloud expires.
 - **Flash** sets `blindUntil` (a gameClock timestamp) on every guard and camera within radius
