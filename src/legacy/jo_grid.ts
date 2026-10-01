@@ -1,5 +1,7 @@
 import { events } from '../core/events';
 import { tileDef, materialTakesDamage } from '../map/tileset';
+import { TILE, tileType } from '../map/tiles';
+import { DOOR_TYPE_DEFAULTS } from '../map/doors';
 import { refreshAutotileAround } from '../render/autotile';
 
 //NOTE: to be batched, I think all images in spritebatch have to be the same sprite:
@@ -44,7 +46,11 @@ function jo_grid(map){
 
     //this is the map, fill it will walls!
     this.map_data = map.data;
-    
+    //Phase 10 (map editor): per-door metadata (type, group, hp/lockpick overrides), keyed by
+    //flat cell index. A door cell with no entry defaults to `locked` — the pre-Phase-10
+    //behaviour — so bank_1.jomap is unchanged. Consumed by applyDoorType() below.
+    this.doorTypes = (map.doorTypes && typeof map.doorTypes === 'object') ? map.doorTypes : {};
+
     this.cells = [];
     
     this.doors = [];//list of doors allows for lockpicking
@@ -236,59 +242,58 @@ function jo_grid(map){
             door_sprite.x += door.x;
             door_sprite.y += door.y;
             this.door_sprites.push(door_sprite);
-    
+            //Phase 10: back-reference so applyDoorType() can reach the sprite from the wall.
+            door.doorSprite = door_sprite;
+
+    };
+
+    //Phase 10 (map editor): apply a door cell's type (from `doorTypes`, default `locked`).
+    //Sets the material/hp (vault is steel = indestructible; reinforced is tougher), the
+    //lockpick time and multi-cell group used by the lockpick channel, and pre-unlocks an
+    //`unlocked` door so the hero can walk through it without picking. Called after the generic
+    //tileset hp/material attach so the door type wins for door cells.
+    this.applyDoorType = function(index, wall){
+        var spec = this.doorTypes[index] || this.doorTypes[String(index)] || { type: 'locked' };
+        var type = DOOR_TYPE_DEFAULTS[spec.type] ? spec.type : 'locked';
+        var def = DOOR_TYPE_DEFAULTS[type];
+        wall.doorType = type;
+        wall.groupId = (spec.group !== undefined) ? spec.group : index;
+        wall.lockpickMs = (spec.lockpickMs !== undefined) ? spec.lockpickMs : def.lockpickMs;
+        wall.material = def.material;
+        wall.hp = (spec.hp !== undefined) ? spec.hp : def.hp;
+        wall.maxHp = wall.hp;
+        if(def.startsUnlocked && wall.doorSprite){ wall.doorSprite.unlocked = true; }
+    };
+
+    //Phase 10: unlock every door cell sharing a group id (a 3-wide vault opens as one). For a
+    //normal door the group is just its own index, so only that door unlocks.
+    this.unlockDoorGroup = function(groupId){
+        for(var k = 0; k < this.doors.length; k++){
+            if(this.doors[k].groupId === groupId && this.door_sprites[k]){
+                this.door_sprites[k].unlock();
+            }
+        }
     };
     
-    //create map:
+    //create map: every cell is built from the shared tile catalog (src/map/tiles.ts) — the
+    //single source of truth the map editor reads from too, so a tile added there appears in
+    //both. `tileType` returns the tile's gameplay flags (solid / vision-blocking / restricted /
+    //door) and the image_number to draw. A code missing from the catalog falls back to a plain
+    //floor (what the old `default` case did), so an unknown/legacy code never crashes the load.
+    var FLOOR_TILE = tileType(TILE.floor);
     for(var i = 0; i < this.map_data.length; i++){
         var tile_type = this.map_data[i];
         var info = this.getInfoFromIndex(i);
         var x_index = info.x_index;
         var y_index = info.y_index;
-        switch(tile_type) {
-        case 1:
-            //black
-            this.cells.push(new jo_wall(0,true,true,false,this.getWallCoords('square',x_index,y_index),x_index,y_index));
-            break;
-        case 2:
-            //white
-            this.cells.push(new jo_wall(1,false,false,false,this.getWallCoords('square',x_index,y_index),x_index,y_index));
-            break;
-        case 3:
-            //brown
-            this.cells.push(new jo_wall(2,true,false,false,this.getWallCoords('square',x_index,y_index),x_index,y_index));
-            break;
-        case 4:
-            //red
-            this.cells.push(new jo_wall(3,false,false,true,this.getWallCoords('square',x_index,y_index),x_index,y_index));
-            break;
-        case 5:
-            //purple (door vertical)
-            var door = new jo_wall(4,true,true,true,this.getWallCoords('square',x_index,y_index),x_index,y_index);
-            door.door = true;
-            this.cells.push(door);
-            this.make_door(door, false);
-            break;
-        
-        case 6:
-            //purple (door horizontal)
-            var door = new jo_wall(4,true,true,true,this.getWallCoords('square',x_index,y_index),x_index,y_index);
-            door.door = true;
-            this.cells.push(door);
-            this.make_door(door, true);
-            break;
-        case 7:
-            //glass wall: solid (blocks_vision false) so it stops movement but not sight or
-            //gunfire. image_number 5 draws the translucent bluish-white square. It carries
-            //hp from the tileset like any wall and, once shot/bombed/rammed enough, breaks
-            //into a walkable gap.
-            this.cells.push(new jo_wall(5,true,false,false,this.getWallCoords('square',x_index,y_index),x_index,y_index));
-            break;
-        default:
-            console.log('here');
-            this.cells.push(new jo_wall(1,false,false,false,this.getWallCoords('square',x_index,y_index),x_index,y_index));
-            break;
-        };
+        var tdef = tileType(tile_type) || FLOOR_TILE;
+        var wall = new jo_wall(tdef.imageNumber, tdef.solid, tdef.blocksVision, tdef.restricted, this.getWallCoords('square',x_index,y_index), x_index, y_index);
+        this.cells.push(wall);
+        if(tdef.door){
+            //A door cell also gets a lockpickable door sprite; doorHorizontal picks the orientation.
+            wall.door = true;
+            this.make_door(wall, !!tdef.doorHorizontal);
+        }
         //Attach destructible-wall data (roadmap §6.1): the material and hp for this tile
         //code come from data/tileset.json; a map may override a single cell's starting hp
         //via `hpOverrides`. Floors have no tileset entry and stay material:null / hp:0, so
@@ -306,21 +311,21 @@ function jo_grid(map){
         //Remember the starting hp so the wall-destruction debug overlay (H key) can draw a
         //bar as a fraction of full health. Damage only ever lowers cell.hp, never maxHp.
         cell.maxHp = cell.hp;
+        //Phase 10 (map editor): a door cell's material/hp/lockpick come from its door type,
+        //overriding the tileset default set just above. Runs after make_door so the sprite
+        //exists (an `unlocked` door pre-unlocks its sprite here).
+        if(cell.door){
+            this.applyDoorType(i, cell);
+        }
     }
     delete this.map_data;
 
     //Map a tile code to the image_number changeImage() draws. Used to pick the floor a
-    //breach leaves behind (the cell's `rubbleTile`).
+    //breach leaves behind (the cell's `rubbleTile`). Derived from the tile catalog; an unknown
+    //code falls back to the floor image, as the old default did.
     this.imageForTileCode = function(tileCode){
-        switch(tileCode){
-            case 1: return 0; //black wall
-            case 2: return 1; //white floor
-            case 3: return 2; //brown
-            case 4: return 3; //red
-            case 5:
-            case 6: return 4; //door / red
-            default: return 1;
-        }
+        var t = tileType(tileCode);
+        return t ? t.imageNumber : 1;
     };
 
     //Roadmap §6.2 — the ONE damage entry point. Bullets, the bomb, frag grenades and (in

@@ -49,6 +49,7 @@ export default defineConfig({
         game: resolve(root, 'game.html'),
         menu: resolve(root, 'menu.html'),
         keybindings: resolve(root, 'keybindings.html'),
+        editor: resolve(root, 'editor.html'),
       },
     },
   },

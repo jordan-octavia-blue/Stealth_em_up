@@ -47,6 +47,10 @@ function sprite_hero_wrapper(pixiSprite,speed_walk,speed_sprint){
         //Drag_body_speed and Run_speed were 4 and 8, which is exactly what the call site
         //already passes, so those two overrides never did anything.
         this.lockpick_speed = 5000;
+        //Phase 10 (map editor): set true when the hero takes the vault key from the bank
+        //manager guard (see the choke-out / kill path in src/systems/input.ts and main.ts).
+        //A vault door then opens instantly instead of needing a very long lockpick.
+        this.hasVaultKey = false;
         this.reload_speed = 2000;
         this.ability_toggle_mask_speed = 500;
         this.ability_choke_speed = 4000;

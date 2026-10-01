@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stealth 'Em Up — Map Editor</title>
+    <style>
+      :root {
+        --bg: #14151b;
+        --panel: #1d1f27;
+        --panel-2: #262935;
+        --line: #333849;
+        --text: #e7e9f0;
+        --muted: #9aa0b0;
+        --accent: #2ec4b6;
+        --accent-2: #4b6cb7;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        overflow: hidden;
+      }
+      #app {
+        display: grid;
+        grid-template-columns: 232px 1fr 296px;
+        grid-template-rows: auto 1fr auto;
+        height: 100vh;
+      }
+      #toolbar {
+        grid-column: 1 / 4;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--line);
+        flex-wrap: wrap;
+      }
+      #toolbar strong { color: var(--accent); margin-right: 4px; }
+      #left, #right {
+        background: var(--panel);
+        overflow-y: auto;
+        padding: 10px;
+      }
+      #left { grid-column: 1; grid-row: 2; border-right: 1px solid var(--line); }
+      #right { grid-column: 3; grid-row: 2; border-left: 1px solid var(--line); }
+      #stage { grid-column: 2; grid-row: 2; position: relative; overflow: hidden; background: #0e0f14; }
+      canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+      #statusbar {
+        grid-column: 1 / 4;
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 6px 12px;
+        background: var(--panel);
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+      }
+      #warn { color: #ffb454; }
+      button, select {
+        background: var(--panel-2);
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 5px 9px;
+        cursor: pointer;
+        font: inherit;
+      }
+      button:hover { border-color: var(--accent); }
+      button.primary { background: var(--accent); color: #06231f; border-color: var(--accent); font-weight: 600; }
+      button:disabled { opacity: 0.45; cursor: default; }
+      .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+      h3 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+      .group { margin-bottom: 6px; }
+      .tool-btn {
+        display: flex; align-items: center; gap: 8px;
+        width: 100%; text-align: left; margin: 3px 0;
+      }
+      .tool-btn.active { border-color: var(--accent); background: #223; box-shadow: inset 0 0 0 1px var(--accent); }
+      .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.25); flex: 0 0 auto; }
+      .bounds-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; max-width: 190px; }
+      .bounds-grid button { padding: 4px; }
+      .muted { color: var(--muted); }
+      .field { margin: 8px 0; }
+      .field label { display: block; color: var(--muted); margin-bottom: 3px; }
+      .field select, .field input { width: 100%; }
+      .row { display: flex; gap: 6px; align-items: center; }
+      .danger { color: #ff6b6b; border-color: #6b2b2b; }
+      a { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header id="toolbar">
+        <strong>Map Editor</strong>
+        <label class="muted">Map</label>
+        <select id="mapSelect" title="Open a saved map"></select>
+        <button id="newMap">New</button>
+        <button id="dupMap">Duplicate</button>
+        <button id="renameMap">Rename</button>
+        <button id="deleteMap" class="danger">Delete</button>
+        <span class="sep"></span>
+        <button id="undo" title="Undo (Ctrl/Cmd+Z)">Undo</button>
+        <button id="redo" title="Redo (Ctrl/Cmd+Shift+Z)">Redo</button>
+        <span class="sep"></span>
+        <button id="importBtn">Import…</button>
+        <input id="importFile" type="file" accept=".jomap,.json,application/json" hidden />
+        <button id="exportBtn">Export .jomap</button>
+        <button id="playBtn" class="primary">▶ Play</button>
+        <span id="mapSize" class="muted"></span>
+      </header>
+
+      <aside id="left">
+        <div id="palette"></div>
+        <h3>Map size</h3>
+        <p class="muted" style="margin:2px 0 8px">Grow (+) or shrink (–) any edge.</p>
+        <div class="bounds-grid" id="boundsGrid"></div>
+      </aside>
+
+      <main id="stage"><canvas id="canvas"></canvas></main>
+
+      <aside id="right">
+        <h3>Inspector</h3>
+        <div id="inspector"><p class="muted">Pick a tool on the left, then paint or click the map. Select an object with its tool (or Erase) to edit it here.</p></div>
+      </aside>
+
+      <footer id="statusbar">
+        <span id="hint"></span>
+        <span id="warn"></span>
+      </footer>
+    </div>
+    <script type="module" src="/src/editor.ts"></script>
+  </body>
+</html>
