@@ -25,6 +25,14 @@ for h in X11/Xlib.h X11/extensions/XInput2.h X11/Xcursor/Xcursor.h GL/gl.h alsa/
   fi
 done
 
+# Odin's Linux releases ship vendor:stb as source only; build it once (needs write access to the Odin install).
+ODIN_ROOT="$(odin root)"
+if [ ! -f "$ODIN_ROOT/vendor/stb/lib/stb_image.a" ]; then
+  echo "building Odin's vendor:stb libraries"
+  (cd "$ODIN_ROOT/vendor/stb/src" && CC="$CC" sh build_stb.sh unix) || {
+    echo "error: could not build $ODIN_ROOT/vendor/stb (try: sudo sh $ODIN_ROOT/vendor/stb/src/build_stb.sh)" >&2; exit 1; }
+fi
+
 if [ ! -d "$SOKOL_DIR/sokol" ]; then
   mkdir -p "$(dirname "$SOKOL_DIR")"
   git clone https://github.com/floooh/sokol-odin "$SOKOL_DIR"
