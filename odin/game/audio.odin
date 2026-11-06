@@ -14,7 +14,10 @@ import "core:os"
 import "core:sync"
 import "core:encoding/endian"
 
-when ODIN_OS == .Linux {
+when ODIN_OS == .Windows {
+	// WASAPI backend, built by build.bat; system libs come from its #pragma comment lines.
+	foreign import saudio_lib {"../build/sokol_audio_windows_x64.lib"}
+} else {
 	foreign import saudio_lib {"../build/libsokol_audio_alsa.a", "system:asound", "system:pthread"}
 }
 

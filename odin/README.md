@@ -5,10 +5,29 @@ This is a native desktop port of the web game (`game.html`). It uses [Odin](http
 is meant to feel identical: the fixed 60 Hz simulation, guard AI and squad tactics, physics, fog of
 war, grenades, the van, breaching and the debug overlays. Only the menu is different.
 
-## Build and run (Linux)
+## Build and run
+
+### Windows
+
+Requirements: `odin` and `git` on PATH, plus the Visual Studio C++ build tools, which Odin already needs for
+linking ("Build Tools for Visual Studio", "Desktop development with C++" workload).
+
+```bat
+odin\build.bat          :: -> odin\bin\stealth_em_up.exe
+odin\build.bat run      :: build, then run from the repo root
+odin\build.bat debug    :: -debug build with a console window
+```
+
+On the first build, the script fetches sokol-odin at a pinned commit and compiles its C libraries with `cl`. It
+finds Visual Studio itself through `vswhere`, so it doesn't need a Developer Command Prompt. Later builds only
+run `odin build`. The game renders through sokol's OpenGL backend (`-define:SOKOL_USE_GL=true`), the same
+renderer the Linux build uses. Stats are stored in `%APPDATA%\stealth_em_up\stats.txt`.
+
+### Linux
 
 Requirements: an Odin compiler (tested with `dev-2026-11`), a C compiler, and the X11/GL/ALSA dev headers
-(`libx11-dev libxi-dev libxcursor-dev libgl-dev libasound2-dev`).
+(`build-essential libx11-dev libxi-dev libxcursor-dev libgl-dev libasound2-dev` on Debian/Ubuntu). If anything
+is missing, `build.sh` says so and prints the install command.
 
 ```sh
 ./odin/build.sh          # -> odin/bin/stealth_em_up (optimised)
@@ -16,8 +35,9 @@ Requirements: an Odin compiler (tested with `dev-2026-11`), a C compiler, and th
 ./odin/build.sh debug    # -debug build
 ```
 
-The first build clones sokol-odin at a pinned commit into `odin/third_party/` (git-ignored) and compiles the
-sokol C libraries, including the ALSA backend of sokol_audio. Set `SOKOL_ODIN_DIR` to use an existing checkout.
+On the first build, the script clones sokol-odin at a pinned commit into `odin/third_party/` (git-ignored) and
+compiles the sokol C libraries, including the ALSA backend of sokol_audio. Set `SOKOL_ODIN_DIR` to use an
+existing checkout.
 
 The game reads its assets from the repo (`images/`, `movie_clips/`, `maps/`, `data/`) plus `odin/assets/`
 (sounds converted to WAV and the Liberation Sans font). It finds the repo root by searching upward from the
@@ -55,8 +75,8 @@ Press Esc during play to return to the menu.
 
 - **Menu:** a native screen replaces `game.html`'s HTML instructions. It shows the controls, the stats and a Start
   button. Esc goes back to it, and "Play Again" restarts directly.
-- **Stats:** the localStorage counters (wins, losses, guards shot and choked) live in
-  `~/.local/share/stealth_em_up/stats.txt`.
+- **Stats:** the localStorage counters (wins, losses, guards shot and choked) live in a text file:
+  `~/.local/share/stealth_em_up/stats.txt` on Linux, or `%APPDATA%\stealth_em_up\stats.txt` on Windows.
 - **Text:** text is drawn with Liberation Sans through fontstash at the on-screen size, so zoomed text stays sharp.
   Box metrics follow Pixi's, so anchored labels sit in the same places.
 - **Audio:** audio is mono at 44.1 kHz. Each web `<audio>` element is one voice that restarts on play, and the

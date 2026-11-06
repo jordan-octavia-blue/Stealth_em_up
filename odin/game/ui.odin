@@ -300,9 +300,16 @@ stats_loaded: bool
 stats_map: map[string]int
 
 stats_path :: proc() -> string {
-	home := os.get_env("HOME", context.temp_allocator)
-	if home == "" do return "stealth_em_up_stats.txt"
-	dir, _ := filepath.join({home, ".local", "share", "stealth_em_up"}, context.temp_allocator)
+	dir: string
+	when ODIN_OS == .Windows {
+		appdata := os.get_env("APPDATA", context.temp_allocator)
+		if appdata == "" do return "stealth_em_up_stats.txt"
+		dir, _ = filepath.join({appdata, "stealth_em_up"}, context.temp_allocator)
+	} else {
+		home := os.get_env("HOME", context.temp_allocator)
+		if home == "" do return "stealth_em_up_stats.txt"
+		dir, _ = filepath.join({home, ".local", "share", "stealth_em_up"}, context.temp_allocator)
+	}
 	p, _ := filepath.join({dir, "stats.txt"}, context.temp_allocator)
 	return p
 }
