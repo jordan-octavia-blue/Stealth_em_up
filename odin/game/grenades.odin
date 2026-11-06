@@ -271,7 +271,12 @@ grenade_frag :: proc(g: ^Grenade, center: Point) {
 	for guard in guards {
 		if guard.alive && pdist(center, {guard.x, guard.y}) < radius do sprite_kill(guard, center.x, center.y)
 	}
-	if hero != nil && pdist(center, {hero.x, hero.y}) < radius do kill_hero(center.x, center.y)
+	for pi in 0 ..< MAX_PLAYERS {
+		if !players[pi].active do continue
+		prev := player_switch(pi)
+		if hero != nil && hero.alive && pdist(center, {hero.x, hero.y}) < radius do kill_hero(center.x, center.y)
+		player_switch(prev)
+	}
 	emit_nav_danger(center.x, center.y, 8, 3)
 	play_sound(.Explosion)
 	cam_start_shake(300, 12)

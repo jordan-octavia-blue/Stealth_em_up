@@ -47,7 +47,7 @@ remove_handlers :: proc(exclude_key_handlers: bool) {
 
 on_key_down :: proc(code: int) {
 	if !key_handlers_enabled do return
-	if hero.alive && car_is_active() {
+	if hero.alive && hero.in_car {
 		if code == 87 do keys.w = true
 		if code == 65 do keys.a = true
 		if code == 83 do keys.s = true
@@ -94,15 +94,15 @@ on_key_down :: proc(code: int) {
 			if !hero.reloading do gun_reload(hero.gun, hero)
 		}
 		if code == 78 {
-			if !keys.n do new_message(fmt_join("Nav overlay: ", nav_debug_cycle()))
+			if !keys.n && bound_is_local() do new_message(fmt_join("Nav overlay: ", nav_debug_cycle()))
 			keys.n = true
 		}
 		if code == 66 {
-			if !keys.b do new_message(fmt_join("Physics overlay: ", physics_debug_cycle()))
+			if !keys.b && bound_is_local() do new_message(fmt_join("Physics overlay: ", physics_debug_cycle()))
 			keys.b = true
 		}
 		if code == 72 {
-			if !keys.h do new_message(fmt_join("Wall overlay: ", breach_debug_cycle()))
+			if !keys.h && bound_is_local() do new_message(fmt_join("Wall overlay: ", breach_debug_cycle()))
 			keys.h = true
 		}
 		if code == 70 {
@@ -148,7 +148,7 @@ on_key_down :: proc(code: int) {
 		}
 	}
 	if code == 27 {
-		pending_action = .Start_Menu
+		if bound_is_local() do pending_action = .Start_Menu
 		return
 	}
 	hero_move_animation_check()
@@ -190,6 +190,8 @@ space_interact :: proc() -> bool {
 				guard.stop_distance = hero.radius * 2
 				clock_after(hero.ability_choke_speed, proc(data: rawptr, arg: int) {
 					g := cast(^Sprite)data
+					prev := player_switch(arg)
+					defer player_switch(prev)
 					if hero_drag_target == g {
 						new_message("The guard is dispached!")
 						guard_kill(g)
@@ -199,7 +201,7 @@ space_interact :: proc() -> bool {
 							hero.speed = hero.speed_walk
 						}
 					}
-				}, guard)
+				}, guard, bound_player)
 				return true
 			}
 		}
@@ -263,16 +265,17 @@ on_mouse_down :: proc(button: sapp.Mousebutton) {
 		}
 		keys.lmb = true
 		if hero.gun_out {
-			if hero.gun.ammo > 0 do cam_start_shake(10, 0)
+			local := bound_is_local()
+			if hero.gun.ammo > 0 && local do cam_start_shake(10, 0)
 			if !hero.gun.automatic {
 				if hero.gun.ammo > 0 {
-					camera.shake_decay = 1.5
+					if local do camera.shake_decay = 1.5
 					hero_fire()
 				}
 			}
 			if hero.gun.ammo <= 0 {
 				new_floating_message("Press 'r' to reload!", hero.x, hero.y, 0xFF0000)
-				play_sound(.Dry_Fire)
+				if local do play_sound(.Dry_Fire)
 			}
 		}
 	} else if button == .RIGHT {
@@ -296,7 +299,7 @@ on_mouse_up :: proc(button: sapp.Mousebutton) {
 	if state != .Gameplay do return
 	if button == .LEFT {
 		keys.lmb = false
-		camera.shake_decay = 1.5
+		if bound_is_local() do camera.shake_decay = 1.5
 	} else if button == .RIGHT {
 		keys.rmb = false
 	}

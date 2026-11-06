@@ -182,7 +182,7 @@ Sprite :: struct {
 	idling, started_idling:     bool,
 	saw_hero_last_at:           Point,
 	accuracy:                   f64,
-	knows_heros_face:           bool,
+	knows_face:                 u8, // bit i: knows player i's face
 	currently_sees_hero:        bool,
 	has_riot_shield:            bool,
 	reaction_time_millis:       f64,
@@ -203,6 +203,8 @@ Sprite :: struct {
 	has_approach_goal:          bool,
 
 	// hero
+	player_id:                  int,
+	aim_point:                  Path_Point, // target_rotate while aiming at the mouse
 	speed_walk, speed_sprint:   f64,
 	masked, gun_out:            bool,
 	in_off_limits, lockpicking: bool,
@@ -516,7 +518,7 @@ new_hero :: proc(body_tex: ^Texture, speed_walk, speed_sprint: f64) -> ^Sprite {
 
 hero_will_cause_alert :: proc(h: ^Sprite) -> bool {
 	return h.masked || h.gun_out || h.in_off_limits || h.lockpicking || h.planting_bomb || h.carry != nil ||
-		hero_drag_target != nil || clock_now() < h.van_suspicious_until
+		player_drag_target(h.player_id) != nil || clock_now() < h.van_suspicious_until
 }
 
 hero_mark_van_suspicious :: proc(h: ^Sprite, duration_ms: f64) {
@@ -533,7 +535,7 @@ hero_set_last_seen :: proc(h: ^Sprite, observer: ^Sprite) {
 	if observer != nil {
 		clock_after(2000, proc(data: rawptr, arg: int) {
 			observer := cast(^Sprite)data
-			h := hero
+			h := players[arg].hero
 			if observer.alive && !observer.being_choked_out {
 				if h.last_seen_x != observer.saw_hero_last_at.x && h.last_seen_y != observer.saw_hero_last_at.y {
 					h.last_seen_x = observer.saw_hero_last_at.x
@@ -543,7 +545,7 @@ hero_set_last_seen :: proc(h: ^Sprite, observer: ^Sprite) {
 					notify_guards_of_hero_location = true
 				}
 			}
-		}, observer)
+		}, observer, h.player_id)
 	} else {
 		if h.last_seen_x != h.x && h.last_seen_y != h.y {
 			h.last_seen_x = h.x
@@ -558,7 +560,7 @@ hero_set_last_seen :: proc(h: ^Sprite, observer: ^Sprite) {
 hero_hurt :: proc(h: ^Sprite, from_x, from_y: f64) {
 	if h.ability_body_armor {
 		if random_float_from_interval(0, 1) >= .5 {
-			new_floating_message("Close Call!", hero.x, hero.y, 0xFFaa00)
+			new_floating_message("Close Call!", h.x, h.y, 0xFFaa00)
 			return
 		}
 	}
@@ -575,11 +577,25 @@ hero_kill :: proc(h: ^Sprite, from_x, from_y: f64) {
 	h.target = null_point()
 	h.sprite_body.tex = img_hero_dead
 	remove_child(h.sprite, h.sprite_head)
-	set_text(message_game_over, "Press [Esc] to restart!")
-	remove_handlers(true)
-	store_inc("loses")
-	splatter_angle := angle_between_points(from_x, from_y, hero.x, hero.y)
-	blood_particle_splatter(splatter_angle, hero.x, hero.y)
+	coop := player_count() > 1
+	if coop && h.carry != nil {
+		// a downed robber drops the loot so the crew can still finish the job
+		l := h.carry
+		h.carry = nil
+		l.x = h.x
+		l.y = h.y
+		l.sprite.visible = true
+	}
+	if !coop || !any_hero_alive() {
+		set_text(message_game_over, net_is_host_or_offline() ? "Press [Esc] to restart!" : "The crew is down. Press [Esc] for the menu.")
+		store_inc("loses")
+		net_on_game_over(false)
+	} else if h.player_id == local_player {
+		set_text(message_game_over, "You're down. Watching the crew...")
+	}
+	if h.player_id == local_player do remove_handlers(true)
+	splatter_angle := angle_between_points(from_x, from_y, h.x, h.y)
+	blood_particle_splatter(splatter_angle, h.x, h.y)
 }
 
 hero_get_spyglass_pos :: proc(h: ^Sprite) -> Point {
@@ -589,7 +605,7 @@ hero_get_spyglass_pos :: proc(h: ^Sprite) -> Point {
 	C := math.sqrt(A * A + B * B)
 	a := c * A / C
 	b := c * B / C
-	return {hero.x + a, hero.y + b}
+	return {h.x + a, h.y + b}
 }
 
 // ---------------------------------------------------------------- guard
@@ -724,7 +740,7 @@ guard_see_alarming_object :: proc(g: ^Sprite) {
 
 guard_become_alarmed :: proc(g: ^Sprite) {
 	if g.alive {
-		if g.knows_heros_face do g.sprite_body.tex = g.has_riot_shield ? img_guard_riot_knows_face : img_guard_knows_hero_face
+		if g.knows_face != 0 do g.sprite_body.tex = g.has_riot_shield ? img_guard_riot_knows_face : img_guard_knows_hero_face
 		else do g.sprite_body.tex = g.has_riot_shield ? img_guard_riot_alert : img_guard_alert
 		g.speed = 3
 		g.alarmed = true

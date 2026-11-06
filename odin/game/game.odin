@@ -19,7 +19,6 @@ particle_container, display_actors, display_guards: ^Node
 
 mouse: Point
 mouse_relative: Point
-hero_mouse_point: Path_Point // target_rotate = mouse (a snapshot of that frame's mouse object)
 
 Keys :: struct {
 	w, a, s, d, r, f, v, g, e, n, b, h, k3, k4, k5: bool,
@@ -340,7 +339,12 @@ start_game :: proc() {
 
 	drag_distance = 5
 	add_key_handlers()
-	prog_init(400, 400, 60, 15)
+	for pi in 0 ..< MAX_PLAYERS {
+		if !players[pi].active do continue
+		prev := player_switch(pi)
+		prog_init(400, 400, 60, 15)
+		player_switch(prev)
+	}
 	spyglass_valid = false
 	mouse = {}
 }
@@ -365,12 +369,7 @@ setup_map :: proc(m: ^Map_Data) {
 	add_child(display_tiles, tile_containers[3])
 	add_child(display_tiles, tile_containers[4])
 
-	hero = new_hero(img_hero_body, 4, 8)
-	hero.x = m.hero.x
-	hero.y = m.hero.y
-	physics_add_hero(hero, hero.radius)
-	hero.speed = hero.speed_walk
-	hero_drag_target = nil
+	players_spawn_all({m.hero.x, m.hero.y})
 	hero_last_seen = new_sprite_obj(.Basic, new_sprite(img_last_seen), nil)
 	hero_last_seen.sprite.visible = false
 	for gp in m.guards {
@@ -437,7 +436,9 @@ animate_gameplay :: proc(delta_ms: f64) {
 
 reaction_timeout :: proc(data: rawptr, arg: int) {
 	g := cast(^Sprite)data
-	if sprite_sees(g, hero) do g.can_shoot = true
+	for p in players {
+		if p.active && p.hero != nil && sprite_sees(g, p.hero) do g.can_shoot = true
+	}
 	g.reacting = false
 }
 
@@ -502,6 +503,9 @@ gameloop_guards :: proc(dt: f64) {
 			}
 		}
 		if tick_stunned(guard) do continue
+		prev := player_switch(pick_seen_hero(guard))
+		defer player_switch(prev)
+		pid := bound_player
 		guard.currently_sees_hero = sprite_sees(guard, hero)
 		aim_x_offset := math.floor(random() * guard.accuracy)
 		aim_y_offset := math.floor(random() * guard.accuracy)
@@ -518,8 +522,8 @@ gameloop_guards :: proc(dt: f64) {
 				}
 			}
 			if !guard.being_choked_out && guard.currently_sees_hero {
-				if hero_will_cause_alert(hero) || guard.knows_heros_face {
-					if !hero.masked do guard.knows_heros_face = true
+				if hero_will_cause_alert(hero) || guard_knows_face(guard, pid) {
+					if !hero.masked do guard_learn_face(guard, pid)
 					new_message("A guard has seen you being suspicious!")
 					guard_see_alarming_object(guard)
 					set_latest_alert(guard)
@@ -533,9 +537,9 @@ gameloop_guards :: proc(dt: f64) {
 			}
 		} else {
 			if !guard.being_choked_out && guard.currently_sees_hero {
-				if (hero_will_cause_alert(hero) || guard.knows_heros_face) && hero.alive {
+				if (hero_will_cause_alert(hero) || guard_knows_face(guard, pid)) && hero.alive {
 					if !hero.masked {
-						guard.knows_heros_face = true
+						guard_learn_face(guard, pid)
 						guard.sprite_body.tex = guard.has_riot_shield ? img_guard_riot_knows_face : img_guard_knows_hero_face
 					}
 					guard.moving = false
@@ -604,23 +608,33 @@ gameloop_security_cams :: proc(dt: f64) {
 						camera_see_alarming_object(cam, o.x, o.y)
 					}
 				}
-				if sprite_sees(cam, hero) {
-					if hero_will_cause_alert(hero) {
-						new_message("A security camera has seen you being suspicious!")
-						camera_see_alarming_object(cam, hero.x, hero.y)
-						sprite_rotate_to(cam, hero.x, hero.y)
-						set_latest_alert(cam)
-						hero_set_last_seen(hero, nil)
-						squad_update_belief(hero.x, hero.y, clock_now())
+				for pi in 0 ..< MAX_PLAYERS {
+					if !players[pi].active || cam.alarmed do continue
+					prev := player_switch(pi)
+					if sprite_sees(cam, hero) {
+						if hero_will_cause_alert(hero) {
+							new_message("A security camera has seen you being suspicious!")
+							camera_see_alarming_object(cam, hero.x, hero.y)
+							sprite_rotate_to(cam, hero.x, hero.y)
+							set_latest_alert(cam)
+							hero_set_last_seen(hero, nil)
+							squad_update_belief(hero.x, hero.y, clock_now())
+						}
 					}
+					player_switch(prev)
 				}
 			} else {
-				if sprite_sees(cam, hero) {
-					if hero.masked {
-						set_latest_alert(cam)
-						hero_set_last_seen(hero, nil)
-						squad_update_belief(hero.x, hero.y, clock_now())
+				for pi in 0 ..< MAX_PLAYERS {
+					if !players[pi].active do continue
+					prev := player_switch(pi)
+					if sprite_sees(cam, hero) {
+						if hero.masked {
+							set_latest_alert(cam)
+							hero_set_last_seen(hero, nil)
+							squad_update_belief(hero.x, hero.y, clock_now())
+						}
 					}
+					player_switch(prev)
 				}
 			}
 		}
@@ -637,6 +651,7 @@ gameloop_security_cams :: proc(dt: f64) {
 }
 
 show_tooltip :: proc(text: string, x, y: f64) {
+	if !bound_is_local() do return
 	tooltip.visible = true
 	tooltip_shown = true
 	set_text(tooltip, text)
@@ -683,16 +698,27 @@ gameloop_bullets :: proc(dt: f64) {
 		to_x := reached_end ? bullet.target.x : bullet.x
 		to_y := reached_end ? bullet.target.y : bullet.y
 		damage_glass_in_bullet_path(bullet, from_x, from_y, to_x, to_y)
-		mask := CAT_VISION_BLOCKER | (bullet.ignore == hero ? CAT_GUARD : CAT_HERO)
-		if bullet.ignore != hero && car_is_active() do mask |= CAT_CAR
+		by_hero := bullet.ignore.kind == .Hero
+		mask := CAT_VISION_BLOCKER | (by_hero ? CAT_GUARD : CAT_HERO)
+		if !by_hero && car_is_active() do mask |= CAT_CAR
 		hit, has_hit := physics_bullet_hit(from_x, from_y, to_x, to_y, bullet.ignore, mask)
-		if bullet.ignore != hero && hero_drag_target != nil &&
-		   circle_linesegment_intersect(hero_drag_target.x, hero_drag_target.y, hero_drag_target.radius, {from_x, from_y}, {to_x, to_y}) {
-			if hero_drag_target.alive do sprite_kill(hero_drag_target)
-			blood_particle_splatter(angle_between_points(from_x, from_y, hero_drag_target.x, hero_drag_target.y), hero_drag_target.x, hero_drag_target.y)
-			remove_bullet(b)
-			b -= 1
-			continue
+		if !by_hero {
+			hit_drag := false
+			for pi in 0 ..< MAX_PLAYERS {
+				t := player_drag_target(pi)
+				if !players[pi].active || t == nil do continue
+				if circle_linesegment_intersect(t.x, t.y, t.radius, {from_x, from_y}, {to_x, to_y}) {
+					if t.alive do sprite_kill(t)
+					blood_particle_splatter(angle_between_points(from_x, from_y, t.x, t.y), t.x, t.y)
+					hit_drag = true
+					break
+				}
+			}
+			if hit_drag {
+				remove_bullet(b)
+				b -= 1
+				continue
+			}
 		}
 		for cam in security_cameras {
 			if circle_linesegment_intersect(cam.x, cam.y, cam.radius, {from_x, from_y}, {to_x, to_y}) do camera_kill(cam)
@@ -701,8 +727,12 @@ gameloop_bullets :: proc(dt: f64) {
 			victim := hit.owner
 			if hit.category & CAT_CAR != 0 {
 				car_hit_by_bullet(bullet.ignore.x, bullet.ignore.y)
-			} else if victim == hero {
-				if hero.alive do hero_hurt(hero, bullet.ignore.x, bullet.ignore.y)
+			} else if victim.kind == .Hero {
+				if victim.alive {
+					prev := player_switch(victim.player_id)
+					hero_hurt(hero, bullet.ignore.x, bullet.ignore.y)
+					player_switch(prev)
+				}
 			} else if victim.alive {
 				guard_dies := true
 				splatter_angle := angle_between_points(bullet.ignore.x, bullet.ignore.y, victim.x, victim.y)
@@ -717,7 +747,7 @@ gameloop_bullets :: proc(dt: f64) {
 					blood_particle_splatter(splatter_angle, victim.x, victim.y)
 					victim.blood_trail = true
 					if victim.alarmed && !backup_called do new_message("You dispatch the guard before he can get the word out!")
-					if bullet.ignore == hero do store_inc("guardsShot")
+					if by_hero && bullet.ignore.player_id == local_player do store_inc("guardsShot")
 				}
 			}
 			remove_bullet(b)
@@ -742,18 +772,23 @@ gameloop_doors :: proc(dt: f64) {
 		cy := wall.y + f64(grid.cell_size) / 2
 		d.opener_near = false
 		for unit in physics_openers_near(cell_index(wall)) {
-			if unit != hero && unit.alive && get_distance(cx, cy, unit.x, unit.y) <= unit.radius * 4 do d.opener_near = true
+			if unit.kind != .Hero && unit.alive && get_distance(cx, cy, unit.x, unit.y) <= unit.radius * 4 do d.opener_near = true
 		}
-		if get_distance(cx, cy, hero.x, hero.y) <= hero.radius * 4 {
-			if d.unlocked do d.opener_near = true
-			if hero.ability_kick_doors && keys.shift {
-				door_open(d)
-				d.broken = true
+		for pi in 0 ..< MAX_PLAYERS {
+			if !players[pi].active do continue
+			prev := player_switch(pi)
+			if get_distance(cx, cy, hero.x, hero.y) <= hero.radius * 4 {
+				if d.unlocked do d.opener_near = true
+				if hero.ability_kick_doors && keys.shift {
+					door_open(d)
+					d.broken = true
+				}
+				if hero.alive do show_tooltip("[Space]", d.x, d.y - 32)
 			}
-			if hero.alive do show_tooltip("[Space]", d.x, d.y - 32)
-		}
-		if hero_drag_target != nil && get_distance(cx, cy, hero_drag_target.x, hero_drag_target.y) <= hero_drag_target.radius * 4 {
-			d.opener_near = true
+			if hero_drag_target != nil && get_distance(cx, cy, hero_drag_target.x, hero_drag_target.y) <= hero_drag_target.radius * 4 {
+				d.opener_near = true
+			}
+			player_switch(prev)
 		}
 		if d.opener_near do door_open(d)
 		else do door_close(d)
@@ -761,6 +796,15 @@ gameloop_doors :: proc(dt: f64) {
 }
 
 gameloop_dragtarget :: proc(dt: f64) {
+	for pi in 0 ..< MAX_PLAYERS {
+		if !players[pi].active do continue
+		prev := player_switch(pi)
+		player_dragtarget()
+		player_switch(prev)
+	}
+}
+
+player_dragtarget :: proc() {
 	for guard in guards {
 		if hero.alive && guard.alive && !guard.being_choked_out && get_distance(hero.x, hero.y, guard.x, guard.y) <= hero.radius * drag_distance {
 			show_tooltip("[Space]", guard.x, guard.y - 32)
@@ -820,7 +864,26 @@ gameloop_messages_and_tooltip :: proc(dt: f64) {
 gameloop_getawaycar_and_loot :: proc(dt: f64) {
 	sprite_prepare_for_draw(getawaycar)
 	for l in loot do sprite_prepare_for_draw(l)
-	if hero.carry == nil && !car_is_active() {
+	for pi in 0 ..< MAX_PLAYERS {
+		if !players[pi].active do continue
+		prev := player_switch(pi)
+		player_pick_up_loot()
+		player_switch(prev)
+	}
+	if !has_won && car_is_active() && car_carries_loot() && has_escape_zone {
+		ex, ey, ew, eh := escape_zone[0], escape_zone[1], escape_zone[2], escape_zone[3]
+		if getawaycar.x >= ex && getawaycar.x <= ex + ew && getawaycar.y >= ey && getawaycar.y <= ey + eh {
+			has_won = true
+			new_message("You escaped with the loot! Clean getaway.")
+			if net_is_host_or_offline() do ui_add_button("Play Again", window_w / 2, window_h / 2, .Play_Again)
+			store_inc("wins")
+			net_on_game_over(true)
+		}
+	}
+}
+
+player_pick_up_loot :: proc() {
+	if hero.carry == nil && !hero.in_car && hero.alive {
 		for l in loot {
 			if get_distance(hero.x, hero.y, l.x, l.y) <= hero.radius * 2 {
 				hero.carry = l
@@ -828,15 +891,6 @@ gameloop_getawaycar_and_loot :: proc(dt: f64) {
 				new_message("You've got the money!  Get it to the van and drive to the escape zone!")
 				break
 			}
-		}
-	}
-	if !has_won && car_is_active() && hero.carry != nil && has_escape_zone {
-		ex, ey, ew, eh := escape_zone[0], escape_zone[1], escape_zone[2], escape_zone[3]
-		if getawaycar.x >= ex && getawaycar.x <= ex + ew && getawaycar.y >= ey && getawaycar.y <= ey + eh {
-			has_won = true
-			new_message("You escaped with the loot! Clean getaway.")
-			ui_add_button("Play Again", window_w / 2, window_h / 2, .Play_Again)
-			store_inc("wins")
 		}
 	}
 }
@@ -872,71 +926,28 @@ pick_up_gun_drop :: proc(d: ^Gun_Drop) {
 hero_fire :: proc() {
 	hero.gun.ammo -= 1
 	do_gun_shot_effects(hero, hero.gun.silenced)
-	camera_kickback()
+	if bound_is_local() do camera_kickback()
 	eject_shell(hero)
 	sprite_shoot(hero)
 	if !hero.gun.silenced do unsilenced_gun()
 }
 
+// One fixed step. The per-player parts run once per robber with that robber's state bound
+// (see players.odin); with a single player the order of operations is exactly the original.
 gameloop :: proc(dt: f64) {
 	clock_update(dt)
 	nav_update(dt)
 	squad_update(clock_now())
 	if mouse_relative.x != -10000 do mouse = cam_get_mouse(mouse_relative)
-	hero_end_aim.x, hero_end_aim.y = physics_sight_stop(hero.x, hero.y, mouse.x, mouse.y)
-	if keys.w do hero.target.y = hero.y - 100
-	else if keys.s do hero.target.y = hero.y + 100
-	else do hero.target.y = hero.y
-	if keys.d do hero.target.x = hero.x + 100
-	else if keys.a do hero.target.x = hero.x - 100
-	else do hero.target.x = hero.x
-	hero.target.null = false
-	if hero.gun_out && keys.lmb && hero.gun.automatic {
-		if hero.gun.ammo > 0 {
-			hero_fire()
-		} else {
-			camera.shake_decay = 1.5
-		}
-	}
+	net_host_apply_remote_inputs()
+	for_each_player(player_step_input, dt)
 	tooltip_shown = false
 	sprite_prepare_for_draw(alert_clip)
-	if prog_bar.visible {
-		prog_increment(dt)
-		prog_prepare_for_draw()
-		prog_draw()
-	}
+	for_each_player(player_step_progress, dt)
 	for d in grid.door_sprites do sprite_prepare_for_draw(d)
-	sprite_move_to_target(hero)
-	if hero.alive && hero.gun_out {
-		hero.aim_start = {hero.x, hero.y}
-		hero.aim_end = hero_end_aim
-	}
-	spyglass_pos = hero_get_spyglass_pos(hero)
-	spyglass_valid = true
-	spyglass_in_wall := is_wall_solid_and_not_door(spyglass_pos.x, spyglass_pos.y)
-	spyglass_in_door = is_wall_door(spyglass_pos.x, spyglass_pos.y)
-	if !hero.alive || (!hero.spyglass_equipped || spyglass_in_wall) {
-		spyglass_pos = {hero.x, hero.y}
-		hero.sprite_spyglass.visible = false
-	} else {
-		hero.sprite_spyglass.visible = true
-	}
+	for_each_player(player_step_move, dt)
 	update_particles(dt)
-	if is_tile_restricted(hero.x, hero.y) {
-		if hero.alive do hero.in_off_limits = true
-	} else {
-		hero.in_off_limits = false
-	}
 	for c in grid.cells do cell_prepare_for_draw(c)
-	if hero.alive && hero_drag_target == nil {
-		hero_mouse_point = {x = mouse.x, y = mouse.y}
-		hero.target_rotate = rot_point(&hero_mouse_point)
-		sprite_rotate_to_instant(hero, mouse.x, mouse.y)
-	} else if hero_drag_target != nil {
-		hero.target_rotate = rot_sprite(hero_drag_target)
-	} else {
-		hero.target_rotate = rot_none
-	}
 	sprite_prepare_for_draw(bomb)
 	if bomb.sprite.visible {
 		g_clear(bomb_radius_debug)
@@ -949,14 +960,16 @@ gameloop :: proc(dt: f64) {
 		hero_last_seen.sprite.visible = math.sqrt(math.pow(hero.x - hero_last_seen.x, 2) + math.pow(hero.y - hero_last_seen.y, 2)) > hero.radius
 	}
 	sprite_prepare_for_draw(hero_last_seen)
-	car_update_pre_step()
+	with_car_driver(car_update_pre_step)
 	gameloop_guards(dt)
-	sprint_knockback(hero, guards[:], keys.shift && hero_drag_target == nil)
+	for_each_player(proc(dt: f64) {
+		sprint_knockback(hero, guards[:], keys.shift && hero_drag_target == nil)
+	}, dt)
 	notify_guards_of_hero_location = false
 	physics_step(dt)
 	physics_sync_actors()
 	car_update_post_step(dt)
-	sprite_prepare_for_draw(hero)
+	for p in players do if p.active do sprite_prepare_for_draw(p.hero)
 	for g in guards do sprite_prepare_for_draw(g)
 	gameloop_security_cams(dt)
 	gameloop_alert_animation(dt)
@@ -977,18 +990,101 @@ gameloop :: proc(dt: f64) {
 			continue
 		}
 		prepare_simple(d.sprite, d.x, d.y, d.rad)
-		if get_distance(hero.x, hero.y, d.x, d.y) <= hero.radius * drag_distance {
-			if hero.ability_auto_pickup_ammo {
-				pick_up_gun_drop(d)
-				break
+		for pi in 0 ..< MAX_PLAYERS {
+			if !players[pi].active do continue
+			prev := player_switch(pi)
+			picked := false
+			if get_distance(hero.x, hero.y, d.x, d.y) <= hero.radius * drag_distance {
+				if hero.ability_auto_pickup_ammo {
+					pick_up_gun_drop(d)
+					picked = true
+				} else {
+					show_tooltip("[Right Click] to pick up gun.", d.x, d.y)
+				}
 			}
-			show_tooltip("[Right Click] to pick up gun.", d.x, d.y)
+			player_switch(prev)
+			if picked do break
 		}
+		if d.flag_for_removal do break
 	}
 	update_camera(dt)
 	physics_debug_draw()
 	breach_debug_draw()
+	net_host_after_step()
 	points_maybe_sweep()
+}
+
+for_each_player :: proc(fn: proc(dt: f64), dt: f64) {
+	for pi in 0 ..< MAX_PLAYERS {
+		if !players[pi].active do continue
+		prev := player_switch(pi)
+		fn(dt)
+		player_switch(prev)
+	}
+}
+
+// Keys -> movement target, and automatic fire.
+player_step_input :: proc(dt: f64) {
+	hero_end_aim.x, hero_end_aim.y = physics_sight_stop(hero.x, hero.y, mouse.x, mouse.y)
+	if keys.w do hero.target.y = hero.y - 100
+	else if keys.s do hero.target.y = hero.y + 100
+	else do hero.target.y = hero.y
+	if keys.d do hero.target.x = hero.x + 100
+	else if keys.a do hero.target.x = hero.x - 100
+	else do hero.target.x = hero.x
+	hero.target.null = false
+	if hero.gun_out && keys.lmb && hero.gun.automatic {
+		if hero.gun.ammo > 0 {
+			hero_fire()
+		} else if bound_is_local() {
+			camera.shake_decay = 1.5
+		}
+	}
+}
+
+player_step_progress :: proc(dt: f64) {
+	if prog_bar.visible {
+		prog_increment(dt)
+		prog_prepare_for_draw()
+		prog_draw()
+	}
+}
+
+// Move, aim, spyglass, off-limits tiles and facing.
+player_step_move :: proc(dt: f64) {
+	if net_hero_is_client_driven(bound_player) {
+		net_host_apply_remote_position(bound_player)
+	} else {
+		sprite_move_to_target(hero)
+	}
+	if hero.alive && hero.gun_out {
+		hero.aim_start = {hero.x, hero.y}
+		hero.aim_end = hero_end_aim
+	}
+	spyglass_pos = hero_get_spyglass_pos(hero)
+	spyglass_valid = true
+	spyglass_in_wall := is_wall_solid_and_not_door(spyglass_pos.x, spyglass_pos.y)
+	spyglass_in_door = is_wall_door(spyglass_pos.x, spyglass_pos.y)
+	if !hero.alive || (!hero.spyglass_equipped || spyglass_in_wall) {
+		spyglass_pos = {hero.x, hero.y}
+		hero.sprite_spyglass.visible = false
+	} else {
+		hero.sprite_spyglass.visible = true
+	}
+	if is_tile_restricted(hero.x, hero.y) {
+		if hero.alive do hero.in_off_limits = true
+	} else {
+		hero.in_off_limits = false
+	}
+	if hero.alive && hero_drag_target == nil {
+		hero.aim_point = {x = mouse.x, y = mouse.y}
+		hero.target_rotate = rot_point(&hero.aim_point)
+		sprite_rotate_to_instant(hero, mouse.x, mouse.y)
+	} else if hero_drag_target != nil {
+		hero.target_rotate = rot_sprite(hero_drag_target)
+	} else {
+		hero.target_rotate = rot_none
+	}
 }
 
 // ---------------------------------------------------------------- helpers
@@ -1083,7 +1179,7 @@ use_mask :: proc(toggle: bool) {
 		hero_img_mask_on(hero, false)
 		for g in guards {
 			if g.alive && !g.being_choked_out && sprite_sees(g, hero) {
-				g.knows_heros_face = true
+				guard_learn_face(g, bound_player)
 				new_message("A guard has seen you taking off your mask!")
 				guard_see_alarming_object(g)
 				set_latest_alert(g)
@@ -1174,7 +1270,12 @@ explode_bomb :: proc() {
 			d -= 1
 		}
 	}
-	if get_distance(bomb.x, bomb.y, hero.x, hero.y) < bomb_radius do kill_hero(bomb.x, bomb.y)
+	for pi in 0 ..< MAX_PLAYERS {
+		if !players[pi].active do continue
+		prev := player_switch(pi)
+		if hero.alive && get_distance(bomb.x, bomb.y, hero.x, hero.y) < bomb_radius do kill_hero(bomb.x, bomb.y)
+		player_switch(prev)
+	}
 }
 
 plant_bomb :: proc() {
