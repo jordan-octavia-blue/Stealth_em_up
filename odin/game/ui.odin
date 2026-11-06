@@ -148,7 +148,7 @@ prog_prepare_for_draw :: proc() {
 
 // ---------------------------------------------------------------- buttons
 
-Button_Action :: enum u8 { Play_Again, Start_Game, Quit }
+Button_Action :: enum u8 { Play_Again, Start_Game, Quit, Host_Steam, Host_Lan, Invite, Leave }
 
 Button :: struct {
 	node:      ^Node, // the button background (a Graphics) with its label as a child
@@ -181,6 +181,27 @@ ui_add_button :: proc(text: string, x, y: f64, action: Button_Action, parent: ^N
 	append(&buttons, b)
 }
 
+Button_Spec :: struct { text: string, action: Button_Action }
+
+// A centred row of buttons, each as wide as its label needs.
+ui_add_button_row :: proc(row: []Button_Spec, cx, y: f64) {
+	GAP :: 20.0
+	first := len(buttons)
+	total := 0.0
+	for s in row {
+		ui_add_button(s.text, 0, y, s.action)
+		total += buttons[len(buttons) - 1].w
+	}
+	total += GAP * f64(len(row) - 1)
+	x := cx - total / 2
+	for i in first ..< len(buttons) {
+		b := buttons[i]
+		b.x = x + b.w / 2
+		b.node.x = b.x
+		x += b.w + GAP
+	}
+}
+
 button_paint :: proc(b: ^Button) {
 	g := b.node
 	g_clear(g)
@@ -211,9 +232,14 @@ ui_click :: proc(x, y: f64) -> bool {
 		if b.enabled && abs(x - b.x) <= b.w / 2 && abs(y - b.y) <= b.h / 2 {
 			b.enabled = false
 			switch b.action {
-			case .Play_Again: pending_action = .Start_Game
-			case .Start_Game: pending_action = .Start_Game
+			case .Play_Again, .Start_Game: request_start_game()
 			case .Quit: pending_action = .Quit
+			case .Host_Steam: net_host_begin(true)
+			case .Host_Lan: net_host_begin(false)
+			case .Invite: steam_invite_dialog()
+			case .Leave:
+				net_leave()
+				menu_refresh()
 			}
 			return true
 		}
@@ -223,6 +249,18 @@ ui_click :: proc(x, y: f64) -> bool {
 
 Pending_Action :: enum u8 { None, Start_Game, Start_Menu, Quit }
 pending_action: Pending_Action
+
+// Start (or restart) a heist: solo, or for the whole crew when hosting. A co-op client waits
+// for the host instead.
+request_start_game :: proc() {
+	if net_is_host() do net_host_start()
+	else if !net_is_client() do pending_action = .Start_Game
+}
+
+// The menu shows network state (crew, status line), so network events ask for a rebuild. It
+// happens at the start of the next frame, never in the middle of a click handler.
+menu_dirty: bool
+menu_refresh :: proc() { menu_dirty = true }
 
 // ---------------------------------------------------------------- menu
 
@@ -253,7 +291,7 @@ menu_build :: proc() {
 	g_end_fill(bg)
 	add_child(stage, bg)
 	cx := window_w / 2
-	y := max(30, window_h / 2 - 330)
+	y := max(20, window_h / 2 - 360)
 	title := new_text("STEALTH 'em UP", 44, 0xFFFFFF, 0x000000, 4)
 	title.anchor = {0.5, 0}
 	title.x = cx
@@ -285,13 +323,41 @@ menu_build :: proc() {
 	stats.x = cx
 	stats.y = y
 	add_child(stage, stats)
-	y += 60
-	ui_add_button("Start Game", cx, y, .Start_Game)
-	hint := new_text("Enter to start", 14, 0x8890a8, 0, 0)
-	hint.anchor = {0.5, 0}
-	hint.x = cx
-	hint.y = y + 40
-	add_child(stage, hint)
+	y += 70
+	menu_build_coop(cx, y)
+}
+
+// The bottom of the menu: solo / host buttons, or the co-op lobby.
+menu_build_coop :: proc(cx, y0: f64) {
+	y := y0
+	line :: proc(s: string, x, y: f64, size: f64, color: u32) {
+		t := new_text(s, size, color, 0, 0)
+		t.anchor = {0.5, 0}
+		t.x = x
+		t.y = y
+		add_child(stage, t)
+	}
+	if net.role == .Offline {
+		ui_add_button_row({{"Start Game", .Start_Game}, {"Host Co-op", .Host_Steam}, {"Host on LAN", .Host_Lan}}, cx, y)
+		line("Enter starts solo. Co-op: 2 to 4 robbers; friends join through a Steam invite.", cx, y + 42, 14, 0x8890a8)
+		if net.status != "" do line(net.status, cx, y + 64, 15, 0xf0c060)
+		return
+	}
+	crew := make([dynamic]string, context.temp_allocator)
+	for i in 0 ..< MAX_PLAYERS {
+		if !session_slots[i] do continue
+		n := net.slot_names[i]
+		if n == "" do n = "..."
+		append(&crew, fmt.tprintf("%s%s", n, i == local_player ? " (you)" : ""))
+	}
+	line(fmt.tprintf("Crew %d/%d:  %s", len(crew), MAX_PLAYERS, strings.join(crew[:], ",   ", context.temp_allocator)), cx, y - 34, 17, 0xFFFFFF)
+	if net.role == .Host {
+		if net.via_steam do ui_add_button_row({{"Start Heist", .Start_Game}, {"Invite Friends", .Invite}, {"Leave", .Leave}}, cx, y + 24)
+		else do ui_add_button_row({{"Start Heist", .Start_Game}, {"Leave", .Leave}}, cx, y + 24)
+	} else {
+		ui_add_button("Leave", cx, y + 24, .Leave)
+	}
+	if net.status != "" do line(net.status, cx, y + 66, 15, 0xf0c060)
 }
 
 // ---------------------------------------------------------------- stats (localStorage)

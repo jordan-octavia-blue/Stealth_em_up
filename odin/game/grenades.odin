@@ -81,6 +81,8 @@ Grenade :: struct {
 	smoke_cells:     [dynamic]int,
 	cloud_fx:        ^Node,
 	sighting:        ^Sprite, // the {x, y} proxy in alarming_objects
+	net_id:          u32,
+	cosmetic:        bool, // co-op client copy: never detonates by itself, waits for the host
 }
 
 grenades: [dynamic]^Grenade
@@ -100,9 +102,16 @@ tint_for :: proc(id: string) -> u32 {
 }
 
 throw_grenade :: proc(type_id: string, target: Point) -> bool {
-	def, ok := throwable_defs[type_id]
-	if !ok do return false
 	start := hero != nil ? Point{hero.x, hero.y} : target
+	g := grenade_spawn(type_id, start, target)
+	if g == nil do return false
+	net_ev_grenade(g)
+	return true
+}
+
+grenade_spawn :: proc(type_id: string, start, target: Point) -> ^Grenade {
+	def, ok := throwable_defs[type_id]
+	if !ok do return nil
 	g := new(Grenade)
 	g.def = def
 	g.start = start
@@ -121,7 +130,7 @@ throw_grenade :: proc(type_id: string, target: Point) -> bool {
 	g.sprite = s
 	grenade_register_sighting(g, start)
 	append(&grenades, g)
-	return true
+	return g
 }
 
 grenade_register_sighting :: proc(g: ^Grenade, at: Point) {
@@ -202,7 +211,7 @@ grenade_step :: proc(g: ^Grenade, dt: f64) {
 	case .Fuse:
 		g.fuse_remaining -= dt
 		if g.sprite != nil do sprite_prepare_for_draw(g.sprite)
-		if g.fuse_remaining <= 0 {
+		if g.fuse_remaining <= 0 && !g.cosmetic {
 			grenade_detonate(g)
 			if g.phase != .Cloud do g.phase = .Done
 		}
@@ -212,7 +221,9 @@ grenade_step :: proc(g: ^Grenade, dt: f64) {
 			fade := clamp(g.cloud_remaining / 1000, 0, 1)
 			g.cloud_fx.alpha = 0.55 * fade + 0.0
 		}
-		if g.cloud_remaining <= 0 {
+		// a client's copy waits for the host's Grenade_Done instead
+		if g.cloud_remaining <= 0 && !g.cosmetic {
+			net_ev_grenade_phase(g, .Grenade_Done)
 			grenade_tear_down_smoke(g)
 			g.phase = .Done
 		}
@@ -221,6 +232,7 @@ grenade_step :: proc(g: ^Grenade, dt: f64) {
 }
 
 grenade_detonate :: proc(g: ^Grenade) {
+	net_ev_grenade_phase(g, .Grenade_Det)
 	grenade_destroy_sprite(g)
 	center := g.target
 	d := &g.def
@@ -230,6 +242,16 @@ grenade_detonate :: proc(g: ^Grenade) {
 	if d.fx_loud do grenade_be_loud(center)
 	else do grenade_be_heard(g, center)
 	grenade_blast_particles(center.x, center.y, d.radius, tint_for(d.id))
+}
+
+// Co-op client: the host decided the grenade went off. Only the parts that are not already
+// sent as their own events (sounds, shake, debris and wall damage are) happen here.
+grenade_detonate_cosmetic :: proc(g: ^Grenade) {
+	grenade_destroy_sprite(g)
+	d := &g.def
+	if d.fx_vision_block do grenade_deploy_smoke(g, g.target)
+	if d.fx_blind do flash_screen()
+	if g.phase != .Cloud do g.phase = .Done
 }
 
 grenade_be_heard :: proc(g: ^Grenade, center: Point) {
@@ -280,6 +302,7 @@ grenade_frag :: proc(g: ^Grenade, center: Point) {
 	emit_nav_danger(center.x, center.y, 8, 3)
 	play_sound(.Explosion)
 	cam_start_shake(300, 12)
+	net_ev_shake(300, 12)
 }
 
 grenade_be_loud :: proc(center: Point) {
@@ -366,7 +389,12 @@ grenade_flash :: proc(g: ^Grenade, center: Point) {
 		if u.alive && pdist(center, {u.x, u.y}) <= radius && physics_can_see(center.x, center.y, u.x, u.y) do u.blind_until = until
 	}
 	cam_start_shake(200, 6)
-	// flashScreen: a white sheet over everything that fades per rendered frame
+	net_ev_shake(200, 6)
+	flash_screen()
+}
+
+// flashScreen: a white sheet over everything that fades per rendered frame
+flash_screen :: proc() {
 	o := new_graphics()
 	g_begin_fill(o, 0xffffff, 1)
 	g_draw_rect(o, -5000, -5000, 20000, 20000)

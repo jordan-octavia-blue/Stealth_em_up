@@ -426,7 +426,8 @@ animate_gameplay :: proc(delta_ms: f64) {
 		step_accumulator += dt
 		for step_accumulator >= STEP_MS {
 			step_accumulator -= STEP_MS
-			gameloop(STEP_MS)
+			if net_is_client() do client_gameloop(STEP_MS)
+			else do gameloop(STEP_MS)
 		}
 	}
 	fog_update()
@@ -474,6 +475,24 @@ null_target :: #force_inline proc(s: ^Sprite) {
 	s.target.null = true
 }
 
+// Whether the local player can see this guard (fog of war). Uses the local spyglass.
+guard_update_visibility :: proc(guard: ^Sprite) {
+	if !enable_los do return
+	in_fog_range := get_distance(guard.x, guard.y, spyglass_pos.x, spyglass_pos.y) <= FOG_RADIUS
+	if !in_fog_range {
+		guard.sprite.visible = false
+	} else if hero.spyglass_equipped && spyglass_in_door && physics_can_see_ignoring_doors(guard.x, guard.y, spyglass_pos.x, spyglass_pos.y) {
+		guard.sprite.visible = true
+	} else if physics_can_see(guard.x, guard.y, spyglass_pos.x, spyglass_pos.y) {
+		guard.sprite.visible = true
+	} else {
+		guard.sprite.visible = false
+	}
+	for cam in security_cameras {
+		if cam.hacked && cam.alive && sprite_sees(cam, guard) do guard.sprite.visible = true
+	}
+}
+
 gameloop_guards :: proc(dt: f64) {
 	for i := 0; i < len(guards); i += 1 {
 		guard := guards[i]
@@ -487,21 +506,7 @@ gameloop_guards :: proc(dt: f64) {
 			sprite_move_to_target(guard)
 			continue
 		}
-		if enable_los {
-			in_fog_range := get_distance(guard.x, guard.y, spyglass_pos.x, spyglass_pos.y) <= FOG_RADIUS
-			if !in_fog_range {
-				guard.sprite.visible = false
-			} else if hero.spyglass_equipped && spyglass_in_door && physics_can_see_ignoring_doors(guard.x, guard.y, spyglass_pos.x, spyglass_pos.y) {
-				guard.sprite.visible = true
-			} else if physics_can_see(guard.x, guard.y, spyglass_pos.x, spyglass_pos.y) {
-				guard.sprite.visible = true
-			} else {
-				guard.sprite.visible = false
-			}
-			for cam in security_cameras {
-				if cam.hacked && cam.alive && sprite_sees(cam, guard) do guard.sprite.visible = true
-			}
-		}
+		guard_update_visibility(guard)
 		if tick_stunned(guard) do continue
 		prev := player_switch(pick_seen_hero(guard))
 		defer player_switch(prev)
@@ -660,6 +665,7 @@ show_tooltip :: proc(text: string, x, y: f64) {
 
 remove_bullet :: proc(index: int) {
 	b := bullets[index]
+	net_ev_bullet_end(b)
 	remove_child(display_actors, b.sprite)
 	ordered_remove(&bullets, index)
 	free_bullet(b)
@@ -1090,6 +1096,7 @@ player_step_move :: proc(dt: f64) {
 // ---------------------------------------------------------------- helpers
 
 new_message :: proc(m: string) {
+	net_ev_msg(m)
 	append(&message_text, strings.clone(m))
 	if len(message_text) > 3 {
 		delete(message_text[0])
@@ -1103,7 +1110,15 @@ new_message :: proc(m: string) {
 	set_text(message, strings.to_string(b))
 }
 
+// A message only this machine's player should see (never sent to the crew).
+local_message :: proc(m: string) {
+	net.mute += 1
+	new_message(m)
+	net.mute -= 1
+}
+
 new_floating_message :: proc(m: string, x, y: f64, color: u32) {
+	net_ev_float(m, x, y, color)
 	n := new_text(m, 30 / stage_child.scale.x, color, 0xFFFFFF, 3)
 	n.anchor.y = 1
 	append(&messages_floating, Floating_Message{node = n, obj_x = x, obj_y = y})
@@ -1202,6 +1217,7 @@ do_gun_shot_effects :: proc(unit: ^Sprite, silenced: bool) {
 }
 
 set_latest_alert :: proc(unit: ^Sprite) {
+	net_ev_alert(unit)
 	if hero_last_seen.sprite.visible || !backup_called {
 		cf := clip_current_frame(alert_clip.sprite)
 		if latest_alert != unit && (cf == len(alert_clip.sprite.clip.frames) - 1 || cf == 0) {
@@ -1243,8 +1259,12 @@ gameloop_bomb :: proc(dt: f64) {
 }
 
 explode_bomb :: proc() {
+	// clients play the bang, shake and doodad clean-up from this one event
+	net_ev_explosion(bomb.x, bomb.y)
+	net.mute += 1
 	play_sound(.Explosion)
 	cam_start_shake(300, 12)
+	net.mute -= 1
 	bomb.sprite.visible = false
 	bomb_tooltip.visible = false
 	alert_all_guards()

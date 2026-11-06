@@ -53,7 +53,7 @@ the alarm over:
 | Dragging or choking a body | `hero_drag_target` | Dragging a corpse or choking a guard |
 | Just rammed a wall or ran someone over in the van | `hero.van_suspicious_until` | The van hits a wall hard or mows a guard down (`odin/game/car.odin`). This is a short deadline set by `hero_mark_van_suspicious()` |
 
-The mask is protection **until a guard sees your face unmasked**. Once a guard sets `knows_heros_face`, the mask
+The mask is protection **until a guard sees your face unmasked**. Once a guard learns that robber's face (`guard_learn_face`, a per-player bit in `knows_face`), the mask
 no longer hides you from that guard.
 
 **Calmly driving a vehicle is not on this list; ramming things with it is.** Sitting in or gently driving the
@@ -149,3 +149,19 @@ All are in `odin/game/`:
 - `phys.odin`: the physics world, raycasts, and the vision blockers smoke uses.
 - `fog.odin`: the player's fog of war, drawn with stencil-buffer visibility polygons.
 - `input.odin`: the key handlers that set the suspicion flags and throw grenades.
+
+## Co-op
+
+Two to four robbers, host-authoritative, over Steam P2P or LAN UDP. `odin/README.md` ("Co-op") has the design.
+What matters when changing gameplay code:
+
+- The single-player globals (`hero`, `keys`, `mouse`, `hero_drag_target`, `prog_bar`, the spyglass) hold whichever
+  player is *bound*. Code that should act for every robber loops over `players` with `player_switch(i)` (and
+  switches back). Between per-player sections the globals hold the local player.
+- Guards and cameras pick which robber to react to with `pick_seen_hero`. Face knowledge is per player.
+- A new one-shot effect (a sound, particles, a message) reaches clients only through an emitter in `net.odin`
+  (`net_ev_*`), usually called at the top of the effect proc. If a client already reproduces it from another
+  event, wrap the host's call in `net.mute += 1` / `net.mute -= 1`.
+- Anything a client must see continuously (positions, flags) goes in the snapshot (`net_write_snapshot` /
+  `net_client_apply_snapshot`). Bump `NET_VERSION` when the wire format changes.
+

@@ -25,6 +25,8 @@ Player :: struct {
 	spyglass_pos:     Point,
 	spyglass_in_door: bool,
 	spyglass_valid:   bool,
+	key_handlers:     bool,
+	mouse_handlers:   bool,
 }
 
 players: [MAX_PLAYERS]Player
@@ -43,6 +45,8 @@ player_save :: proc() {
 	p.spyglass_pos = spyglass_pos
 	p.spyglass_in_door = spyglass_in_door
 	p.spyglass_valid = spyglass_valid
+	p.key_handlers = key_handlers_enabled
+	p.mouse_handlers = mouse_handlers_enabled
 }
 
 player_load :: proc(i: int) {
@@ -58,6 +62,8 @@ player_load :: proc(i: int) {
 	spyglass_pos = p.spyglass_pos
 	spyglass_in_door = p.spyglass_in_door
 	spyglass_valid = p.spyglass_valid
+	key_handlers_enabled = p.key_handlers
+	mouse_handlers_enabled = p.mouse_handlers
 }
 
 // Makes player i's state live in the globals and returns who was bound before.
@@ -125,6 +131,8 @@ player_spawn :: proc(i: int, spawn: Point) {
 	p.drag_target = nil
 	p.keys = {}
 	p.mouse = {}
+	p.key_handlers = true
+	p.mouse_handlers = true
 }
 
 // Guards and cameras look for robbers. Returns the robber `observer` would react to:

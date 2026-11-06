@@ -104,6 +104,7 @@ add_container_particle :: proc(list: ^[dynamic]Particle, p: Particle, tex: ^Text
 }
 
 shard_particle_splatter :: proc(angle, tx, ty: f64) {
+	net_ev_splatter(.Shard, angle, tx, ty)
 	amount := int(random_int_from_interval(6, 30))
 	angle := angle + math.PI / 2
 	for _ in 0 ..< amount {
@@ -124,6 +125,7 @@ shard_particle_splatter :: proc(angle, tx, ty: f64) {
 }
 
 blood_particle_splatter :: proc(angle, tx, ty: f64) {
+	net_ev_splatter(.Blood, angle, tx, ty)
 	amount := int(random_int_from_interval(30, 60))
 	angle := angle + math.PI / 2
 	for _ in 0 ..< amount {
@@ -143,6 +145,7 @@ blood_particle_splatter :: proc(angle, tx, ty: f64) {
 }
 
 grenade_blast_particles :: proc(cx, cy, radius: f64, tint: u32) {
+	net_ev_blast(cx, cy, radius, tint)
 	if particle_container == nil do return
 	amount := int(random_int_from_interval(24, 40))
 	for _ in 0 ..< amount {
@@ -164,6 +167,7 @@ grenade_blast_particles :: proc(cx, cy, radius: f64, tint: u32) {
 }
 
 eject_shell :: proc(source: ^Sprite) {
+	net_ev_shell(source)
 	p: Particle
 	p.x = source.x
 	p.y = source.y
@@ -249,6 +253,7 @@ blood_reset :: proc() {
 }
 
 draw_blood_trail :: proc(x, y, size: f64) {
+	net_ev_trail(x, y, size)
 	g_begin_fill(blood.graphics, 0x990000, 1.0)
 	g_draw_circle(blood.graphics, x, y, size)
 	blood.pending += 1

@@ -52,6 +52,8 @@ if not exist "%HERE%\bin" mkdir "%HERE%\bin"
 set FLAGS=-collection:sokol="%S%" -collection:physics="%HERE%\physics" -define:SOKOL_USE_GL=true -out:"%HERE%\bin\stealth_em_up.exe"
 if "%1"=="debug" (set FLAGS=%FLAGS% -debug) else (set FLAGS=%FLAGS% -o:speed -subsystem:windows)
 odin build "%HERE%\game" %FLAGS% || exit /b 1
+REM Steamworks runtime (redistributable), loaded at runtime for co-op; the game runs without it.
+copy /y "%HERE%\steam\win64\steam_api64.dll" "%HERE%\bin\" >nul
 echo built %HERE%\bin\stealth_em_up.exe
 if "%1"=="run" (
   pushd "%HERE%\.."

@@ -18,6 +18,12 @@ tells you what's missing.
 The first build fetches sokol and compiles its C libraries once. See [`odin/README.md`](odin/README.md) for
 details, the code layout and controls.
 
+## Co-op
+
+Two to four robbers can pull the heist together over Steam. Click **Host Co-op** in the menu, invite friends from
+the Steam overlay, then **Start Heist**. Steam has to be running. Until the game has its own Steam app ID it uses
+Valve's test app (480); set `STEAM_APP_ID` to override. See [`odin/README.md`](odin/README.md#co-op).
+
 ## Layout
 
 - `odin/`: the game (`odin/game/`), the physics engine (`odin/physics/`), build scripts, sounds and font.

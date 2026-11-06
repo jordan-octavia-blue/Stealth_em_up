@@ -177,6 +177,7 @@ load_wav :: proc(name: string) -> Clip {
 }
 
 play_sound :: proc(id: Sound_Id) {
+	net_ev_sound(id)
 	if !audio.ok do return
 	sync.mutex_lock(&audio.mutex)
 	audio.voices[id].pos = 0
@@ -185,6 +186,7 @@ play_sound :: proc(id: Sound_Id) {
 }
 
 play_gun_shots :: proc() {
+	net_ev_gunshot()
 	if !audio.ok do return
 	if audio.gun_index >= GUN_SHOT_VOICES do audio.gun_index = 0
 	sync.mutex_lock(&audio.mutex)

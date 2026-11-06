@@ -66,6 +66,7 @@ init :: proc "c" () {
 	load_weapons()
 	guns_init()
 	load_images()
+	net_register_textures()
 	if !load_map(concat2("maps/", "bank_1.jomap")) {
 		sapp.request_quit()
 		return
@@ -79,6 +80,22 @@ init :: proc "c" () {
 	menu_build()
 	app_ok = true
 	if os.get_env("STEALTH_AUTOSTART", context.temp_allocator) != "" do pending_action = .Start_Game
+	net_startup_from_env_and_args()
+}
+
+// Co-op entry points that don't go through the menu:
+//   - Steam launches us with `+connect_lobby <id>` when a friend accepts an invite while
+//     the game is closed;
+//   - STEALTH_HOST=1 / STEALTH_JOIN=<ip[:port]> host or join over plain UDP (LAN, testing).
+net_startup_from_env_and_args :: proc() {
+	if os.get_env("STEALTH_HOST", context.temp_allocator) != "" {
+		net_host_begin(false)
+	} else if addr := os.get_env("STEALTH_JOIN", context.temp_allocator); addr != "" {
+		net_join_udp(addr)
+	} else if steam_init() {
+		// Steam up from the start, so a friend's invite or "Join Game" reaches us in the menu
+		if lobby := steam_lobby_from_args(); lobby != 0 do steam_join_lobby(lobby)
+	}
 }
 
 frame :: proc "c" () {
@@ -90,6 +107,8 @@ frame :: proc "c" () {
 	if last_time != 0 do delta_ms = stm.ms(stm.diff(now, last_time))
 	last_time = now
 
+	net_frame(delta_ms)
+
 	switch pending_action {
 	case .None:
 	case .Start_Game:
@@ -98,11 +117,19 @@ frame :: proc "c" () {
 		delta_ms = 0
 	case .Start_Menu:
 		pending_action = .None
+		menu_dirty = false
 		start_menu()
 		menu_build()
 	case .Quit:
 		sapp.request_quit()
 		return
+	}
+	if menu_dirty {
+		menu_dirty = false
+		if state == .Start_Menu {
+			start_menu()
+			menu_build()
+		}
 	}
 
 	// Pixi's shared ticker drives MovieClips on wall-clock time.
@@ -149,27 +176,47 @@ event :: proc "c" (e: ^sapp.Event) {
 		cursor_x = f64(e.mouse_x) / scale
 		cursor_y = f64(e.mouse_y) / scale
 		if ui_click(cursor_x, cursor_y) do return
-		if state == .Gameplay do on_mouse_down(e.mouse_button)
+		if state != .Gameplay do return
+		if net_is_client() {
+			if e.mouse_button == .LEFT || e.mouse_button == .RIGHT do net_client_mouse(e.mouse_button == .LEFT ? 0 : 1, true)
+		} else {
+			on_mouse_down(e.mouse_button)
+		}
 	case .MOUSE_UP:
-		on_mouse_up(e.mouse_button)
+		if state != .Gameplay do return
+		if net_is_client() {
+			if e.mouse_button == .LEFT || e.mouse_button == .RIGHT do net_client_mouse(e.mouse_button == .LEFT ? 0 : 1, false)
+		} else {
+			on_mouse_up(e.mouse_button)
+		}
 	case .MOUSE_SCROLL:
 		if state == .Gameplay do on_mouse_wheel(e.scroll_y)
 	case .KEY_DOWN:
 		if state == .Start_Menu {
-			if e.key_code == .ENTER || e.key_code == .KP_ENTER do pending_action = .Start_Game
+			if e.key_code == .ENTER || e.key_code == .KP_ENTER do request_start_game()
 			return
 		}
+		if state != .Gameplay do return
 		code := sapp_to_keycode(e.key_code)
-		if code >= 0 do on_key_down(code)
+		if code < 0 do return
+		if net_is_client() {
+			if !e.key_repeat do net_client_key_down(code)
+		} else {
+			on_key_down(code)
+		}
 	case .KEY_UP:
 		if state != .Gameplay do return
 		code := sapp_to_keycode(e.key_code)
-		if code >= 0 do on_key_up(code)
+		if code < 0 do return
+		if net_is_client() do net_client_key_up(code)
+		else do on_key_up(code)
 	}
 }
 
 cleanup :: proc "c" () {
 	context = runtime.default_context()
+	net_leave()
+	steam_shutdown()
 	audio_shutdown()
 	sgl.shutdown()
 	sg.shutdown()

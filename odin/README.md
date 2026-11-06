@@ -46,6 +46,40 @@ working directory and from the executable.
 
 Set `STEALTH_AUTOSTART=1` to skip the menu.
 
+## Co-op
+
+Two to four robbers in one heist. The menu has **Host Co-op** (Steam) and **Host on LAN** (plain UDP on port
+27015). A host's lobby lists the crew and has **Start Heist**, **Invite Friends** (opens the Steam overlay) and
+**Leave**.
+
+- **Steam:** the game loads `steam_api64.dll` / `libsteam_api.so` at runtime (they're in `odin/steam/`, and the
+  build scripts copy them into `odin/bin/`), so it still starts and plays solo without Steam. It uses Steam lobbies
+  for invites and `ISteamNetworkingMessages` for P2P traffic through Steam's relays, so no port forwarding is
+  needed. The app ID is 480 (Valve's Spacewar test app) unless `STEAM_APP_ID` is set. A friend who accepts an
+  invite while the game is closed gets it launched with `+connect_lobby <id>`.
+- **LAN / testing:** `STEALTH_HOST=1` hosts over UDP at startup and `STEALTH_JOIN=<ip>[:port]` joins. The UDP
+  transport has no reliability layer, so keep it to a LAN or one machine.
+
+Rules: there is no joining a heist in progress. A downed robber drops the loot and spectates, and the heist is
+lost when every robber is down. The van seats a driver plus passengers. Esc takes the host's whole crew back to
+the lobby; a client's Esc leaves the crew.
+
+How it works (`game/players.odin`, `game/net.odin`, `game/net_transport.odin`):
+
+- The host runs the full simulation with every robber in it. Each robber's input state lives in `players[]`, and
+  `player_switch(i)` swaps it into the globals the single-player code reads (`hero`, `keys`, `mouse`, ...). With
+  one player that is exactly the single-player path.
+- Clients run no AI or game rules. A client moves its own robber locally (so walking feels the same) and sends its
+  position and mouse every tick. Key and button presses go to the host reliably, and the host replays them
+  through the normal handlers with that player bound.
+- The host sends a snapshot every other tick (30 Hz, unreliable) that clients smooth toward, plus a reliable event
+  stream for one-shot things: sounds, messages, particles, bullets, wall damage, grenades, explosions, alerts and
+  the end of the heist. Effects that a client replays itself (for example the shards from wall damage) are
+  wrapped in `net.mute` on the host so they aren't sent twice.
+- Both sides seed the RNG with the host's seed before `start_game`, so the map setup matches.
+- Cost: offline play only pays a few `net.role` checks on effect calls. A host serialises a ~1-2 KB snapshot
+  every other tick; clients skip the AI, nav and squad updates.
+
 ## Controls
 
 The handlers are in `game/input.odin`, and the menu lists the bindings (`CONTROLS` in `game/ui.odin`). Keep the two in sync.
@@ -73,6 +107,7 @@ The right-hand column names the TypeScript each file was ported from, which is i
 | `game/input.odin` | keyboard and mouse handlers |
 | `game/ui.odin` | the progress bar, buttons, menu and stats |
 | `game/debug.odin` | the N, B and H overlays |
+| `game/players.odin`, `game/net.odin`, `game/net_transport.odin` | new: co-op players, netcode, UDP and Steam transports |
 
 ## Intentional differences from the web build
 

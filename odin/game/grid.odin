@@ -303,6 +303,10 @@ grid_damage_cell :: proc(index: int, amount: f64, type: Damage_Type) {
 	if x == 0 || x == grid.width - 1 || y == 0 || y == grid.height - 1 do return
 	material := c.material == .None ? Material.Brick : c.material
 	if !material_takes_damage(material, type) do return
+	// clients replay the damage (and with it the shards and sounds it makes) themselves
+	net_ev_cell(index, amount, type)
+	net.mute += 1
+	defer net.mute -= 1
 	c.hp -= amount
 	if c.hp > 0 do return
 	grid_destroy_cell(index)

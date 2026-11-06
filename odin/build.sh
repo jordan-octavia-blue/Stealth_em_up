@@ -67,5 +67,7 @@ mkdir -p "$HERE/bin"
 FLAGS=(-collection:sokol="$S" -collection:physics="$HERE/physics" -out:"$HERE/bin/stealth_em_up")
 if [ "${1:-}" = "debug" ]; then FLAGS+=(-debug); else FLAGS+=(-o:speed); fi
 odin build "$HERE/game" "${FLAGS[@]}"
+# Steamworks runtime (redistributable), loaded at runtime for co-op; the game runs without it.
+cp -f "$HERE/steam/linux64/libsteam_api.so" "$HERE/bin/"
 echo "built $HERE/bin/stealth_em_up"
 if [ "${1:-}" = "run" ]; then cd "$HERE/.." && "$HERE/bin/stealth_em_up"; fi

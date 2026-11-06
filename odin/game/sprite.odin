@@ -129,6 +129,7 @@ gun_shoot :: proc(g: ^Gun, unit: ^Sprite) {
 		else do bullet.speed = 75
 		bullet.stop_distance = bullet.speed
 		append(&bullets, bullet)
+		net_ev_bullet(bullet)
 		sprite_rotate_to_instant(unit, sx, sy)
 	}
 }
@@ -150,6 +151,7 @@ rot_set :: proc(r: Rot_Target) -> bool { return r.sprite != nil || r.point != ni
 
 Sprite :: struct {
 	kind:          Sprite_Kind,
+	net_id:        u32, // co-op: host-assigned id for bullets
 	reg_index:     int,
 	x, y, rad:     f64,
 	target:        ^Path_Point,
@@ -593,7 +595,12 @@ hero_kill :: proc(h: ^Sprite, from_x, from_y: f64) {
 	} else if h.player_id == local_player {
 		set_text(message_game_over, "You're down. Watching the crew...")
 	}
-	if h.player_id == local_player do remove_handlers(true)
+	// a downed robber can still press Esc, but no longer acts
+	{
+		prev := player_switch(h.player_id)
+		remove_handlers(true)
+		player_switch(prev)
+	}
 	splatter_angle := angle_between_points(from_x, from_y, h.x, h.y)
 	blood_particle_splatter(splatter_angle, h.x, h.y)
 }
@@ -901,6 +908,7 @@ Gun_Drop :: struct {
 	sprite:           ^Node,
 	parent:           ^Node,
 	flag_for_removal: bool,
+	net_id:           u32,
 }
 
 new_gun_drop :: proc(node, parent: ^Node, x, y: f64, gun: ^Gun) -> ^Gun_Drop {
@@ -908,6 +916,8 @@ new_gun_drop :: proc(node, parent: ^Node, x, y: f64, gun: ^Gun) -> ^Gun_Drop {
 	d.x = x
 	d.y = y
 	d.gun = gun
+	net.next_id += 1
+	d.net_id = net.next_id
 	d.rad = math.PI * 2 * random()
 	d.sprite = node
 	node.anchor = {0.5, 0.5}

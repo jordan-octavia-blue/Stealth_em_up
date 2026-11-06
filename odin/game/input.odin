@@ -94,15 +94,15 @@ on_key_down :: proc(code: int) {
 			if !hero.reloading do gun_reload(hero.gun, hero)
 		}
 		if code == 78 {
-			if !keys.n && bound_is_local() do new_message(fmt_join("Nav overlay: ", nav_debug_cycle()))
+			if !keys.n && bound_is_local() do local_message(fmt_join("Nav overlay: ", nav_debug_cycle()))
 			keys.n = true
 		}
 		if code == 66 {
-			if !keys.b && bound_is_local() do new_message(fmt_join("Physics overlay: ", physics_debug_cycle()))
+			if !keys.b && bound_is_local() do local_message(fmt_join("Physics overlay: ", physics_debug_cycle()))
 			keys.b = true
 		}
 		if code == 72 {
-			if !keys.h && bound_is_local() do new_message(fmt_join("Wall overlay: ", breach_debug_cycle()))
+			if !keys.h && bound_is_local() do local_message(fmt_join("Wall overlay: ", breach_debug_cycle()))
 			keys.h = true
 		}
 		if code == 70 {
@@ -148,7 +148,11 @@ on_key_down :: proc(code: int) {
 		}
 	}
 	if code == 27 {
-		if bound_is_local() do pending_action = .Start_Menu
+		if bound_is_local() {
+			// hosting: everyone goes back to the lobby; the crew stays together
+			if net_is_host() do net_host_to_lobby()
+			pending_action = .Start_Menu
+		}
 		return
 	}
 	hero_move_animation_check()
