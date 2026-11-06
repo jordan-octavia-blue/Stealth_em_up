@@ -1,8 +1,9 @@
 # Stealth 'em Up: Odin + Sokol port
 
-This is a native desktop port of the web game (`game.html`). It uses [Odin](https://odin-lang.org) and
+This is the game: a native desktop port of the original JavaScript/Pixi browser version, which has since been
+removed but is still in git history. It uses [Odin](https://odin-lang.org) and
 [sokol-odin](https://github.com/floooh/sokol-odin). The gameplay is a line-for-line port of the TypeScript sources and
-is meant to feel identical: the fixed 60 Hz simulation, guard AI and squad tactics, physics, fog of
+feels identical: the fixed 60 Hz simulation, guard AI and squad tactics, physics, fog of
 war, grenades, the van, breaching and the debug overlays. Only the menu is different.
 
 ## Build and run
@@ -47,12 +48,14 @@ Set `STEALTH_AUTOSTART=1` to skip the menu.
 
 ## Controls
 
-These are the same bindings as `src/systems/input.ts`. The menu lists them too (`CONTROLS` in `game/ui.odin`).
+The handlers are in `game/input.odin`, and the menu lists the bindings (`CONTROLS` in `game/ui.odin`). Keep the two in sync.
 Press Esc during play to return to the menu.
 
 ## Layout
 
-| File | Ports |
+The right-hand column names the TypeScript each file was ported from, which is in git history.
+
+| File | Ported from |
 |---|---|
 | `game/main.odin` | the window, frame loop and event plumbing |
 | `game/render.odin`, `game/core.odin`, `game/text.odin` | the Pixi v3 subset: scene graph, Graphics, MovieClip, Text, ParticleContainer |
