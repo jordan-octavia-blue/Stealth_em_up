@@ -1339,6 +1339,8 @@ KICKBACK_AMOUNT :: 30.0
 
 update_camera :: proc(dt: f64) {
 	car_target, has_car := car_camera_target()
+	watched := spectate_hero()
+	if watched != nil do has_car = watched.in_car
 	desired := has_car ? zoom * CAR_ZOOM_OUT : zoom
 	if stage_child.scale.x < desired - 0.05 {
 		stage_child.scale.x += zoom_magnitude
@@ -1349,7 +1351,11 @@ update_camera :: proc(dt: f64) {
 		stage_child.scale.y -= zoom_magnitude
 		change_font_sizes()
 	}
-	if has_car {
+	if watched != nil {
+		p := spectate_camera_point(watched)
+		camera.x = p.x
+		camera.y = p.y
+	} else if has_car {
 		camera.x = car_target.x
 		camera.y = car_target.y
 	} else {

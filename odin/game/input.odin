@@ -47,6 +47,7 @@ remove_handlers :: proc(exclude_key_handlers: bool) {
 
 on_key_down :: proc(code: int) {
 	if !key_handlers_enabled do return
+	if bound_is_local() && spectate_on_key(code, true) do return
 	if hero.alive && hero.in_car {
 		if code == 87 do keys.w = true
 		if code == 65 do keys.a = true
@@ -228,6 +229,7 @@ space_interact :: proc() -> bool {
 
 on_key_up :: proc(code: int) {
 	if !key_handlers_enabled do return
+	if bound_is_local() && spectate_on_key(code, false) do return
 	switch code {
 	case 87: keys.w = false
 	case 65: keys.a = false
