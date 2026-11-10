@@ -76,9 +76,41 @@ Map_Data :: struct {
 	has_escape:         bool,
 	patrol_routes:      []Patrol_Route,
 	hp_overrides:       map[int]f64,
+	backup_guards:      int,
 }
 
 map_data: Map_Data
+
+// The heists, easiest first. maps/build_maps.py builds all but the bank from maps/src/.
+Map_Entry :: struct { file, name, blurb: string }
+MAPS := [?]Map_Entry{
+	{"corner_store.jomap", "Corner Store", "Easy: one shop floor, 2 guards, 1 camera"},
+	{"jewelry_store.jomap", "Jewelry Store", "Medium: the vault is behind the security office, 4 guards, 2 cameras"},
+	{"bank_1.jomap", "First National Bank", "Hard: the original bank, 6 guards, 2 cameras"},
+	{"federal_reserve.jomap", "Federal Reserve", "Hardest: four locks to the vault, 9 guards, 4 cameras"},
+}
+selected_map: int // index into MAPS; the host's choice in co-op
+
+map_select :: proc(i: int) {
+	selected_map = clamp(i, 0, len(MAPS) - 1)
+}
+
+// Loads MAPS[selected_map] into map_data, replacing the previous map.
+map_load_selected :: proc() -> bool {
+	return load_map(concat2("maps/", MAPS[selected_map].file))
+}
+
+map_unload :: proc(m: ^Map_Data) {
+	delete(m.data)
+	delete(m.guards)
+	delete(m.security_cams)
+	for r in m.patrol_routes do delete(r.points)
+	delete(m.patrol_routes)
+	clear(&m.hp_overrides)
+	hp := m.hp_overrides
+	m^ = {}
+	m.hp_overrides = hp
+}
 
 load_map :: proc(path: string) -> bool {
 	data, err := os.read_entire_file(asset_path(path), context.allocator)
@@ -86,10 +118,15 @@ load_map :: proc(path: string) -> bool {
 		fmt.eprintln("map not found:", path)
 		return false
 	}
+	defer delete(data)
 	v, jerr := json.parse(data)
 	if jerr != nil do return false
+	defer json.destroy_value(v)
 	root := v.(json.Object)
 	m := &map_data
+	map_unload(m)
+	m.backup_guards = 7
+	if b, ok := root["backupGuards"]; ok do m.backup_guards = int(jnum(b))
 	m.width = int(jnum(root["width"]))
 	m.height = int(jnum(root["height"]))
 	arr := root["data"].(json.Array)

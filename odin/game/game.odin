@@ -311,6 +311,10 @@ start_game :: proc() {
 	bomb_radius = 200
 	blood_setup()
 
+	if !map_load_selected() {
+		map_select(0)
+		map_load_selected()
+	}
 	setup_map(&map_data)
 
 	camera = {}
@@ -383,7 +387,7 @@ setup_map :: proc(m: ^Map_Data) {
 		append(&guards, inst)
 	}
 	guard_backup_spawn = {m.guard_backup_spawn.x, m.guard_backup_spawn.y}
-	num_backup_guards = 7
+	num_backup_guards = m.backup_guards
 	backup_called = false
 	computer_for_security_cameras = new_sprite_obj(.Basic, new_sprite(img_computer), nil)
 	computer_for_security_cameras.x = m.computer.x
@@ -818,9 +822,6 @@ player_dragtarget :: proc() {
 	}
 	if !tooltip_shown {
 		tooltip.visible = false
-		if !hero.masked {
-			show_tooltip(fmt.tprintf("%v,%v", js_round(mouse.x), js_round(mouse.y)), hero.x, hero.y + f64(grid.cell_size))
-		}
 	}
 	if hero_drag_target != nil {
 		t := hero_drag_target
@@ -881,7 +882,13 @@ gameloop_getawaycar_and_loot :: proc(dt: f64) {
 		if getawaycar.x >= ex && getawaycar.x <= ex + ew && getawaycar.y >= ey && getawaycar.y <= ey + eh {
 			has_won = true
 			new_message("You escaped with the loot! Clean getaway.")
-			if net_is_host_or_offline() do ui_add_button("Play Again", window_w / 2, window_h / 2, .Play_Again)
+			if net_is_host_or_offline() {
+				if selected_map + 1 < len(MAPS) {
+					ui_add_button_row({{"Play Again", .Play_Again}, {"Next Heist", .Next_Heist}}, window_w / 2, window_h / 2)
+				} else {
+					ui_add_button("Play Again", window_w / 2, window_h / 2, .Play_Again)
+				}
+			}
 			store_inc("wins")
 			net_on_game_over(true)
 		}

@@ -23,7 +23,7 @@ import "core:strings"
 import "core:os"
 import "core:mem"
 
-NET_VERSION :: 1
+NET_VERSION :: 2
 SNAPSHOT_EVERY_TICKS :: 2
 PEER_TIMEOUT_MS :: 10000.0
 HELLO_RESEND_MS :: 500.0
@@ -327,6 +327,7 @@ net_send_lobby :: proc() {
 	for s, i in session_slots do if s do mask |= 1 << uint(i)
 	w_u8(&b, mask)
 	for n in net.slot_names do w_str(&b, n)
+	w_u8(&b, u8(selected_map))
 	net_broadcast(b[:], true)
 }
 
@@ -343,6 +344,7 @@ net_host_start :: proc() {
 		for s, i in session_slots do if s do mask |= 1 << uint(i)
 		w_u8(&b, mask)
 		w_u8(&b, u8(p.slot))
+		w_u8(&b, u8(selected_map))
 		transport_send(p.id, b[:], true)
 	}
 	net.in_lobby = false
@@ -857,12 +859,14 @@ net_client_receive :: proc(pk: Net_Packet) {
 			net.slot_names[i] = strings.clone(name)
 			session_slots[i] = mask & (1 << uint(i)) != 0
 		}
+		map_select(int(r_u8(&r)))
 		net.welcomed = true
 		menu_refresh()
 	case .Start:
 		net.seed = r_u64(&r)
 		mask := r_u8(&r)
 		local_player = int(r_u8(&r))
+		map_select(int(r_u8(&r)))
 		for i in 0 ..< MAX_PLAYERS do session_slots[i] = mask & (1 << uint(i)) != 0
 		net.welcomed = true
 		net.in_lobby = false
@@ -1215,9 +1219,6 @@ client_gameloop :: proc(dt: f64) {
 		if prog_bar.visible do prog_draw()
 		else do g_clear(prog_bar.graphics)
 		player_switch(prev)
-	}
-	if !tooltip_shown && h.alive && !h.masked {
-		show_tooltip(fmt.tprintf("%v,%v", js_round(mouse.x), js_round(mouse.y)), h.x, h.y + f64(grid.cell_size))
 	}
 	nav_debug_draw()
 	gameloop_messages_and_tooltip(dt)

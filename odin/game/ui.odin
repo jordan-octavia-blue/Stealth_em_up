@@ -148,7 +148,7 @@ prog_prepare_for_draw :: proc() {
 
 // ---------------------------------------------------------------- buttons
 
-Button_Action :: enum u8 { Play_Again, Start_Game, Quit, Host_Steam, Host_Lan, Invite, Leave }
+Button_Action :: enum u8 { Play_Again, Start_Game, Quit, Host_Steam, Host_Lan, Invite, Leave, Next_Heist, Map_Prev, Map_Next }
 
 Button :: struct {
 	node:      ^Node, // the button background (a Graphics) with its label as a child
@@ -161,14 +161,14 @@ Button :: struct {
 }
 buttons: [dynamic]^Button
 
-ui_add_button :: proc(text: string, x, y: f64, action: Button_Action, parent: ^Node = nil) {
+ui_add_button :: proc(text: string, x, y: f64, action: Button_Action, parent: ^Node = nil, min_w := 220.0) {
 	b := new(Button)
 	b.action = action
 	b.enabled = true
 	b.label = new_text(text, 30, 0x000000, 0xFFFFFF, 4)
 	b.label.anchor = {0.5, 0.5}
 	w, _ := text_size(b.label.text)
-	b.w = max(220, w + 60)
+	b.w = max(min_w, w + 60)
 	b.h = 64
 	b.x = x
 	b.y = y
@@ -240,6 +240,11 @@ ui_click :: proc(x, y: f64) -> bool {
 			case .Leave:
 				net_leave()
 				menu_refresh()
+			case .Next_Heist:
+				choose_map(selected_map + 1)
+				request_start_game()
+			case .Map_Prev: choose_map(selected_map - 1)
+			case .Map_Next: choose_map(selected_map + 1)
 			}
 			return true
 		}
@@ -255,6 +260,15 @@ pending_action: Pending_Action
 request_start_game :: proc() {
 	if net_is_host() do net_host_start()
 	else if !net_is_client() do pending_action = .Start_Game
+}
+
+// The heist picker: solo players and the host choose; a co-op client follows the host.
+choose_map :: proc(i: int) {
+	if net_is_client() do return
+	map_select((i + len(MAPS)) % len(MAPS))
+	store_set("map", selected_map)
+	if net_is_host() do net_send_lobby()
+	menu_refresh()
 }
 
 // The menu shows network state (crew, status line), so network events ask for a rebuild. It
@@ -297,24 +311,24 @@ menu_build :: proc() {
 	title.x = cx
 	title.y = y
 	add_child(stage, title)
-	y += 70
+	y += 60
 	blurb := new_text("Grab the loot, get in the van, drive to the green escape zone.", 18, 0xd9ddec, 0x000000, 0)
 	blurb.anchor = {0.5, 0}
 	blurb.x = cx
 	blurb.y = y
 	add_child(stage, blurb)
-	y += 40
+	y += 32
 	for row in CONTROLS {
-		l := new_text(row[0], 17, 0xafbcec, 0, 0)
+		l := new_text(row[0], 15, 0xafbcec, 0, 0)
 		l.anchor = {1, 0}
 		l.x = cx - 12
 		l.y = y
 		add_child(stage, l)
-		r := new_text(row[1], 17, 0xFFFFFF, 0, 0)
+		r := new_text(row[1], 15, 0xFFFFFF, 0, 0)
 		r.x = cx + 12
 		r.y = y
 		add_child(stage, r)
-		y += 24
+		y += 20
 	}
 	y += 14
 	stats := new_text(fmt.tprintf("Wins %s   Losses %s   Guards shot %s   Guards choked %s",
@@ -323,8 +337,30 @@ menu_build :: proc() {
 	stats.x = cx
 	stats.y = y
 	add_child(stage, stats)
-	y += 70
+	y += 50
+	menu_build_map_picker(cx, y)
+	y += 90
 	menu_build_coop(cx, y)
+}
+
+// "< Corner Store >" with its difficulty line. A co-op client sees the host's pick without arrows.
+menu_build_map_picker :: proc(cx, y: f64) {
+	e := MAPS[selected_map]
+	name := new_text(fmt.tprintf("Heist %d of %d:  %s", selected_map + 1, len(MAPS), e.name), 26, 0xFFFFFF, 0x000000, 3)
+	name.anchor = {0.5, 0.5}
+	name.x = cx
+	name.y = y
+	add_child(stage, name)
+	if !net_is_client() {
+		w, _ := text_size(name.text)
+		ui_add_button("<", cx - w / 2 - 50, y, .Map_Prev, nil, 60)
+		ui_add_button(">", cx + w / 2 + 50, y, .Map_Next, nil, 60)
+	}
+	blurb := new_text(e.blurb, 15, 0xafbcec, 0, 0)
+	blurb.anchor = {0.5, 0}
+	blurb.x = cx
+	blurb.y = y + 36
+	add_child(stage, blurb)
 }
 
 // The bottom of the menu: solo / host buttons, or the co-op lobby.
@@ -406,6 +442,18 @@ store_inc :: proc(name: string) {
 	if name in stats_map do stats_map[name] += 1
 	else do stats_map[strings.clone(name)] = 1
 	stats_save()
+}
+
+store_set :: proc(name: string, v: int) {
+	stats_load()
+	if name in stats_map do stats_map[name] = v
+	else do stats_map[strings.clone(name)] = v
+	stats_save()
+}
+
+stats_get_int :: proc(name: string) -> int {
+	stats_load()
+	return stats_map[name] or_else 0
 }
 
 store_get :: proc(name: string) -> string {

@@ -67,7 +67,9 @@ init :: proc "c" () {
 	guns_init()
 	load_images()
 	net_register_textures()
-	if !load_map(concat2("maps/", "bank_1.jomap")) {
+	map_select(stats_get_int("map"))
+	if v := os.get_env("STEALTH_MAP", context.temp_allocator); v != "" do map_select(int(v[0] - '1')) // 1-4, for testing
+	if !map_load_selected() {
 		sapp.request_quit()
 		return
 	}

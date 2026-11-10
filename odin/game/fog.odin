@@ -14,7 +14,7 @@ import sgl "sokol:gl"
 FOG_RADIUS :: 900.0
 CAMERA_CONE :: (2 * math.PI) / 3
 WALL_LIGHT_INSET :: 20.0
-enable_los := true
+enable_los := false // the line-of-sight shade (fog of war). Off: the whole map and every guard are visible.
 
 Segment :: struct { x1, y1, x2, y2: f64 }
 

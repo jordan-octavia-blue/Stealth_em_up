@@ -80,6 +80,17 @@ How it works (`game/players.odin`, `game/net.odin`, `game/net_transport.odin`):
 - Cost: offline play only pays a few `net.role` checks on effect calls. A host serialises a ~1-2 KB snapshot
   every other tick; clients skip the AI, nav and squad updates.
 
+## Heists
+
+The menu picks one of four heists, easiest first (`MAPS` in `game/grid.odin`): Corner Store, Jewelry Store, the
+original First National Bank, and Federal Reserve. In co-op the host picks and the crew sees the choice. After a
+win, **Next Heist** moves to the next one. The choice is remembered in the stats file. `STEALTH_MAP=1`..`4` picks
+one at startup (handy with `STEALTH_AUTOSTART=1`).
+
+The new maps are drawn as ASCII in `maps/src/*.txt` (the legend is at the top of `maps/build_maps.py`). Run
+`python3 maps/build_maps.py` after editing one. It checks that the robber can reach the loot and the van, that the
+van can drive to the escape zone, and where each camera can hang.
+
 ## Controls
 
 The handlers are in `game/input.odin`, and the menu lists the bindings (`CONTROLS` in `game/ui.odin`). Keep the two in sync.
@@ -99,7 +110,7 @@ The right-hand column names the TypeScript each file was ported from, which is i
 | `game/game.odin` | `src/legacy/main.ts` and `camera.ts` |
 | `game/sprite.odin` | jo_sprite, the hero, guards, cameras, doors and guns |
 | `game/grid.odin` | the map loader, tile grid, autotiling and breach damage |
-| `game/fog.odin` | the fog of war; visibility polygons are cut out with the stencil buffer |
+| `game/fog.odin` | the fog of war; visibility polygons are cut out with the stencil buffer. Off by default (`enable_los`) |
 | `game/effects.odin` | particles and the baked blood trail |
 | `game/car.odin` | the van and melee |
 | `game/grenades.odin` | weapons data and grenades |

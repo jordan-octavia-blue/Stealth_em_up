@@ -165,3 +165,7 @@ What matters when changing gameplay code:
 - Anything a client must see continuously (positions, flags) goes in the snapshot (`net_write_snapshot` /
   `net_client_apply_snapshot`). Bump `NET_VERSION` when the wire format changes.
 
+## Maps
+
+Heists are listed in `MAPS` in `odin/game/grid.odin`, easiest first. Except for `maps/bank_1.jomap`, each one is
+an ASCII file in `maps/src/` built by `python3 maps/build_maps.py`. Edit the `.txt`, not the `.jomap`, and rebuild.
