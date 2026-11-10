@@ -28,7 +28,10 @@ find_asset_root :: proc() -> string {
 		dir := s
 		for _ in 0 ..< 5 {
 			probe, _ := filepath.join({dir, "maps", "bank_1.jomap"}, context.temp_allocator)
-			if os.exists(probe) do return strings.clone(dir)
+			if os.exists(probe) {
+				assets_on_disk = true
+				return strings.clone(dir)
+			}
 			dir = filepath.dir(dir)
 		}
 	}
@@ -56,8 +59,9 @@ init :: proc "c" () {
 	stm.setup()
 	render_init()
 	asset_root = find_asset_root()
+	assets_init()
 	if !text_init() do fmt.eprintln("text disabled")
-	if !load_spritesheet(asset_path("images/spritesheet.json"), asset_path("images/spritesheet.png")) {
+	if !load_spritesheet("images/spritesheet.json", "images/spritesheet.png") {
 		fmt.eprintln("could not load images/spritesheet.json")
 		sapp.request_quit()
 		return

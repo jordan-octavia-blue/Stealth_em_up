@@ -10,6 +10,8 @@ Guidance for working in this repo. Start with `README.md` (how to build and run)
   (`.github/workflows/ci.yml`).
 - Runtime assets stay at the repo root: `images/`, `movie_clips/`, `maps/` and `data/`. The game also uses
   `odin/assets/`, which holds the WAV sounds and the font. `sound/` keeps the original audio files.
+  All of these are embedded in the exe (`odin/game/assets.odin`); load them through `read_asset`, never
+  `os.read_entire_file`, or a shipped exe will not find them.
 - The JavaScript/Pixi version was removed. It is still in git history before the commit "Make the Odin build the
   only build" if you need to compare behaviour. The Odin code was ported from it line for line, and comments
   often name the TS file a proc came from.

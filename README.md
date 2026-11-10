@@ -27,7 +27,8 @@ Valve's test app (480); set `STEAM_APP_ID` to override. See [`odin/README.md`](o
 ## Layout
 
 - `odin/`: the game (`odin/game/`), the physics engine (`odin/physics/`), build scripts, sounds and font.
-- `images/`, `movie_clips/`, `maps/`, `data/`: runtime assets, read from the repo at startup.
+- `images/`, `movie_clips/`, `maps/`, `data/`: runtime assets. They are compiled into the executable, and read
+  from disk instead when the game runs inside the repo.
 - `maps/src/`: ASCII sources for the heists; `python3 maps/build_maps.py` turns them into `.jomap` files.
 - `sound/`: the original audio files. The game plays the WAV conversions in `odin/assets/sound/`.
 - `working_files/`: Tiled sources for the maps.

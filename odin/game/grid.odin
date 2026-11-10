@@ -47,8 +47,8 @@ material_from_string :: proc(s: string) -> Material {
 }
 
 load_tileset :: proc() -> bool {
-	data, err := os.read_entire_file(asset_path("data/tileset.json"), context.allocator)
-	if err != nil do return false
+	data, ok := read_asset("data/tileset.json")
+	if !ok do return false
 	v, jerr := json.parse(data)
 	if jerr != nil do return false
 	tiles := v.(json.Object)["tiles"].(json.Object)
@@ -121,8 +121,8 @@ map_unload :: proc(m: ^Map_Data) {
 }
 
 load_map :: proc(path: string) -> bool {
-	data, err := os.read_entire_file(asset_path(path), context.allocator)
-	if err != nil {
+	data, ok := read_asset(path)
+	if !ok {
 		fmt.eprintln("map not found:", path)
 		return false
 	}

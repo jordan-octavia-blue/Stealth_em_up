@@ -32,3 +32,10 @@ jobs:
       - name: Build
         shell: cmd
         run: odin\build.bat
+      - name: Upload the Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: stealth_em_up-windows
+          path: |
+            odin/bin/stealth_em_up.exe
+            odin/bin/steam_api64.dll

@@ -61,9 +61,14 @@ g_sampler: sg.Sampler
 g_white: ^Texture
 
 load_base_texture :: proc(path: string) -> ^Base_Texture {
-	cpath := strings.clone_to_cstring(path, context.temp_allocator)
+	file, ok := read_asset(path)
+	if !ok {
+		fmt.eprintln("could not load image", path)
+		return nil
+	}
+	defer delete(file)
 	w, h, comp: i32
-	pixels := stbi.load(cpath, &w, &h, &comp, 4)
+	pixels := stbi.load_from_memory(raw_data(file), i32(len(file)), &w, &h, &comp, 4)
 	if pixels == nil {
 		fmt.eprintln("could not load image", path)
 		return nil
@@ -101,8 +106,8 @@ texture_cache: map[string]^Texture
 
 // TexturePacker JSON (array form) loaded the way Pixi v3's spritesheet loader does.
 load_spritesheet :: proc(json_path, image_path: string) -> bool {
-	data, err := os.read_entire_file(json_path, context.allocator)
-	if err != nil {
+	data, ok := read_asset(json_path)
+	if !ok {
 		fmt.eprintln("could not read", json_path)
 		return false
 	}
@@ -176,7 +181,7 @@ frame_tex :: proc(name: string) -> ^Texture {
 // Pixi's Texture.fromImage(url): a standalone image file, cached by url.
 image_tex :: proc(path: string) -> ^Texture {
 	if t, ok := texture_cache[path]; ok do return t
-	base := load_base_texture(asset_path(path))
+	base := load_base_texture(path)
 	if base == nil do return g_white
 	t := texture_from_base(base, strings.clone(path))
 	texture_cache[t.name] = t
