@@ -7,6 +7,8 @@ Source format: a header of `key: value` lines, a blank line, then the grid (one 
 
 Tiles:     #  brick wall      .  floor          ,  off-limits floor (restricted)
            d  desk/drywall    g  glass          D  door in a vertical wall    =  door in a horizontal wall
+           R  reinforced door in a vertical wall    H  reinforced door in a horizontal wall
+              (lock-picked like any door, but a drop kick cannot smash it)
 Objects (placed on a tile, which the object character stands in for):
            @  robber spawn (floor)              G  guard on floor     Q  guard on off-limits floor
            C  security camera on a wall cell (mounted on a free corner of that cell)
@@ -19,11 +21,11 @@ import json, math, os, sys
 from collections import deque
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TILE = {'#': 1, '.': 2, ',': 4, 'd': 3, 'g': 7, 'D': 5, '=': 6,
+TILE = {'#': 1, '.': 2, ',': 4, 'd': 3, 'g': 7, 'D': 5, '=': 6, 'R': 8, 'H': 9,
         '@': 2, 'G': 2, 'Q': 4, 'C': 1, 'P': 4, '$': 4, 'V': 2, 'B': 2, 'E': 2}
 CS = 64
-WALKABLE = {2, 4, 5, 6}           # doors are lock-picked, so they count as passable
-VISION_BLOCKING = {1, 5, 6}
+WALKABLE = {2, 4, 5, 6, 8, 9}           # doors are lock-picked, so they count as passable
+VISION_BLOCKING = {1, 5, 6, 8, 9}
 
 
 def load(path):

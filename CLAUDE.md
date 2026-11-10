@@ -52,6 +52,7 @@ the alarm over:
 | Carrying stolen loot | `hero.carry` | Holding the money |
 | Dragging or choking a body | `hero_drag_target` | Dragging a corpse or choking a guard |
 | Just rammed a wall or ran someone over in the van | `hero.van_suspicious_until` | The van hits a wall hard or mows a guard down (`odin/game/car.odin`). This is a short deadline set by `hero_mark_van_suspicious()` |
+| Mid drop kick, or just landed one | `hero.kick_state`, `hero.kick_suspicious_until` | In the air during a drop kick (Q), and for ~2.5 s after it hits a guard, body, door or wall (`odin/game/kick.odin`) |
 
 The mask is protection **until a guard sees your face unmasked**. Once a guard learns that robber's face (`guard_learn_face`, a per-player bit in `knows_face`), the mask
 no longer hides you from that guard.
@@ -135,6 +136,15 @@ runs, and then its effect fires.
   that the same flash just blinded are skipped. Frag skips this because it is loud and calls
   `alert_all_guards()` instead.
 
+### The running drop kick
+
+`Q` while holding a direction (`kick_start` in `odin/game/kick.odin`). The robber lunges ~170 px, then lies on
+the floor briefly. The host decides hits (`kick_hits`): a living guard is launched backwards and stunned (the melee
+stun from `car.odin`) and becomes alarmed after the usual reaction delay; a dead body slides back; a closed door is
+smashed open for good, locked or not, unless it is **reinforced** (map tiles 8 / 9, `R` / `H` in `maps/src/`). A
+smashed door is heard by calm guards within `KICK_DOOR_HEAR_PX`. A client lunges its own robber locally; the host
+sends `net_ev_kick_land` when a hit cuts the kick short, and the snapshot carries the pose (`P_KICK_AIR` / `P_KICK_LAND`).
+
 ### Key files
 
 All are in `odin/game/`:
@@ -145,6 +155,7 @@ All are in `odin/game/`:
   and mask and bomb handling.
 - `squad.odin`: squad tactics for alarmed guards, such as entry points and converging on the last known position.
 - `car.odin`: van enter and exit, driving, engine noise, run-overs and melee.
+- `kick.odin`: the running drop kick.
 - `grenades.odin`: frag, smoke and flash, from the throw arc and fuse to the three effects.
 - `phys.odin`: the physics world, raycasts, and the vision blockers smoke uses.
 - `fog.odin`: the player's fog of war, drawn with stencil-buffer visibility polygons.

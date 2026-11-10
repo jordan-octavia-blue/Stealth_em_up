@@ -218,6 +218,7 @@ Grid :: struct {
 }
 
 grid: Grid
+REINFORCED_DOOR_TINT :: 0x8fa3b8 // steel grey-blue, so it reads as "don't bother kicking"
 tile_containers: [6]^Node
 
 new_cell :: proc(image_number: int, solid, blocks_vision, restricted: bool, gx, gy: int) -> ^Cell {
@@ -253,13 +254,18 @@ grid_build :: proc(m: ^Map_Data) {
 		case 2: c = new_cell(1, false, false, false, x, y)
 		case 3: c = new_cell(2, true, false, false, x, y)
 		case 4: c = new_cell(3, false, false, true, x, y)
-		case 5, 6:
+		case 5, 6, 8, 9:
+			// 8 and 9 are reinforced doors: lock-picked like any door, but a drop kick bounces off
 			c = new_cell(4, true, true, true, x, y)
 			c.door = true
 			append(&grid.doors, c)
-			ds := new_door(code == 6, c)
+			ds := new_door(code == 6 || code == 9, c)
 			ds.x += c.x
 			ds.y += c.y
+			if code >= 8 {
+				ds.reinforced = true
+				ds.sprite.tint = REINFORCED_DOOR_TINT
+			}
 			append(&grid.door_sprites, ds)
 		case 7: c = new_cell(5, true, false, false, x, y)
 		case: c = new_cell(1, false, false, false, x, y)
@@ -341,7 +347,7 @@ image_for_tile_code :: proc(code: int) -> int {
 	case 2: return 1
 	case 3: return 2
 	case 4: return 3
-	case 5, 6: return 4
+	case 5, 6, 8, 9: return 4
 	}
 	return 1
 }

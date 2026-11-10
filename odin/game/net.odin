@@ -23,7 +23,7 @@ import "core:strings"
 import "core:os"
 import "core:mem"
 
-NET_VERSION :: 2
+NET_VERSION :: 3
 SNAPSHOT_EVERY_TICKS :: 2
 PEER_TIMEOUT_MS :: 10000.0
 HELLO_RESEND_MS :: 500.0
@@ -37,7 +37,7 @@ Msg :: enum u8 {
 
 Ev :: enum u8 {
 	Sound = 1, Gunshot, Msg, Float, Bullet, Bullet_End, Blood, Shard, Shell, Blast, Trail,
-	Cell, Shake, Alert, Explosion, Grenade, Grenade_Det, Grenade_Done, End,
+	Cell, Shake, Alert, Explosion, Grenade, Grenade_Det, Grenade_Done, End, Kick_Land,
 }
 
 Net_Peer :: struct {
@@ -581,6 +581,12 @@ net_ev_sound :: proc(id: Sound_Id) {
 	b := ev_begin(.Sound)
 	w_u8(b, u8(id))
 }
+// A drop kick connected on the host: that robber's own machine ends the lunge too.
+net_ev_kick_land :: proc(slot: int) {
+	if !net_emitting() do return
+	b := ev_begin(.Kick_Land)
+	w_u8(b, u8(slot))
+}
 net_ev_gunshot :: proc() {
 	if !net_emitting() do return
 	ev_begin(.Gunshot)
@@ -711,6 +717,8 @@ P_PROG :: 1 << 8
 P_VISIBLE :: 1 << 9
 P_DRAGGING :: 1 << 10
 P_HEAD :: 1 << 11
+P_KICK_AIR :: 1 << 12
+P_KICK_LAND :: 1 << 13
 
 G_ALIVE :: 1 << 0
 G_MOVING :: 1 << 1
@@ -778,6 +786,8 @@ net_write_snapshot :: proc(b: ^[dynamic]u8) {
 		if h.sprite.visible do f |= P_VISIBLE
 		if p.drag_target != nil do f |= P_DRAGGING
 		if h.sprite_head.parent != nil do f |= P_HEAD
+		if h.kick_state == .Air do f |= P_KICK_AIR
+		if h.kick_state == .Land do f |= P_KICK_LAND
 		w_u16(b, f)
 		w_u8(b, tex_id(h.sprite_body.tex))
 		w_u8(b, tex_id(h.sprite_head.tex))
@@ -953,6 +963,10 @@ net_client_track_key :: proc(code: int, down: bool) {
 	case 68: keys.d = down
 	case 16: keys.shift = down
 	case 32: keys.space = down
+	case 81:
+		// we walk our own robber, so the lunge starts here; the host decides what it hits
+		if down && !keys.q do kick_start()
+		keys.q = down
 	}
 	if hero != nil && hero.alive do hero_move_animation_check()
 }
@@ -1095,6 +1109,9 @@ net_client_apply_events :: proc(r: ^Reader) {
 				g.phase = .Done
 				delete_key(&net.grenades_by, id)
 			}
+		case .Kick_Land:
+			slot := int(r_u8(r))
+			if r.ok && slot == local_player && hero != nil do kick_land(hero)
 		case .End:
 			won := r_u8(r) != 0
 			net.game_over = true
@@ -1132,7 +1149,9 @@ client_gameloop :: proc(dt: f64) {
 		else if keys.a do h.target.x = h.x - 100
 		else do h.target.x = h.x
 		h.target.null = false
-		sprite_move_to_target(h)
+		if !kick_drive(h) do sprite_move_to_target(h)
+	} else {
+		h.kick_state = .None
 	}
 	// everyone else glides to the latest snapshot
 	for i in 0 ..< MAX_PLAYERS {
@@ -1341,6 +1360,14 @@ net_client_apply_snapshot :: proc() {
 				h.sprite_animate = false
 			}
 			h.sprite_spyglass.visible = f & P_SPYGLASS != 0
+			// another robber's kick pose; the host faces them along the kick
+			if f & P_KICK_AIR != 0 do h.kick_state = .Air
+			else if f & P_KICK_LAND != 0 do h.kick_state = .Land
+			else do h.kick_state = .None
+			if h.kick_state != .None {
+				h.kick_dx = math.cos(rad)
+				h.kick_dy = math.sin(rad)
+			}
 		}
 		if h.alive && !alive {
 			h.alive = false

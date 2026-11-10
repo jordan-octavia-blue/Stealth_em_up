@@ -224,6 +224,10 @@ Sprite :: struct {
 	ability_toggle_mask_speed:  f64,
 	ability_choke_speed:        f64,
 	van_suspicious_until:       f64,
+	kick_state:                 Kick_State, // running drop kick (kick.odin)
+	kick_until:                 f64,
+	kick_dx, kick_dy:           f64,
+	kick_suspicious_until:      f64,
 	sprite_spyglass:            ^Node,
 	sprite_head:                ^Node,
 	sprite_animate:             bool,
@@ -246,6 +250,7 @@ Sprite :: struct {
 	opened:       bool,
 	opener_near:  bool,
 	broken:       bool,
+	reinforced:   bool, // a drop kick cannot smash it
 	horizontal:   bool,
 	rot_closed:   f64,
 	rot_open:     f64,
@@ -446,6 +451,7 @@ angle_between_relative :: proc(s: ^Sprite, ox, oy: f64) -> f64 {
 }
 
 sprite_prepare_for_draw :: proc(s: ^Sprite) {
+	if s.kind == .Hero do kick_pose(s)
 	s.sprite.x = s.x
 	s.sprite.y = s.y
 	s.sprite.rotation = s.rad
@@ -520,7 +526,8 @@ new_hero :: proc(body_tex: ^Texture, speed_walk, speed_sprint: f64) -> ^Sprite {
 
 hero_will_cause_alert :: proc(h: ^Sprite) -> bool {
 	return h.masked || h.gun_out || h.in_off_limits || h.lockpicking || h.planting_bomb || h.carry != nil ||
-		player_drag_target(h.player_id) != nil || clock_now() < h.van_suspicious_until
+		player_drag_target(h.player_id) != nil || h.kick_state == .Air ||
+		clock_now() < max(h.van_suspicious_until, h.kick_suspicious_until)
 }
 
 hero_mark_van_suspicious :: proc(h: ^Sprite, duration_ms: f64) {

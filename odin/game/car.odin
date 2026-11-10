@@ -358,8 +358,15 @@ car_update_post_step :: proc(dt_ms: f64) {
 	dt := dt_ms / 1000
 	for i := len(car.knockbacks) - 1; i >= 0; i -= 1 {
 		k := &car.knockbacks[i]
-		k.sprite.x += k.vx * dt
-		k.sprite.y += k.vy * dt
+		nx := k.sprite.x + k.vx * dt
+		ny := k.sprite.y + k.vy * dt
+		// a body stops at a wall instead of sliding into it
+		if is_wall_solid(nx, ny) {
+			ordered_remove(&car.knockbacks, i)
+			continue
+		}
+		k.sprite.x = nx
+		k.sprite.y = ny
 		k.vx *= 0.85
 		k.vy *= 0.85
 		k.ttl -= dt_ms
