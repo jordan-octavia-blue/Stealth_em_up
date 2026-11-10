@@ -84,6 +84,10 @@ Each frame, `gameloop_guards` and `gameloop_security_cams` check every guard's a
 3. Gunshots and cameras broadcast the hero's position immediately via `hero_set_last_seen()`. That sends
    *already-alarmed* guards to repath to that spot. It does **not** alarm calm guards.
 
+A **bugged** camera (Space next to it, `camera_bug` in `sprite.odin`) detects nothing: `gameloop_security_cams`
+skips it, and an alarm it had already raised does not escalate. It keeps swivelling and feeds the robbers' fog of
+war, and shows the "off" texture tinted green (clients derive the tint from the snapshot's `hacked` flag).
+
 Dead bodies are their own alarm source. `guard_kill()` pushes the corpse into `alarming_objects`, so a guard or
 camera that later sees it alerts the same way.
 

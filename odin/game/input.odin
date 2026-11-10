@@ -191,7 +191,9 @@ space_interact :: proc() -> bool {
 		}
 	}
 	for cam in security_cameras {
-		if hero.alive && get_distance(hero.x, hero.y, cam.x, cam.y) <= hero.radius * drag_distance do cam.hacked = true
+		if hero.alive && cam.alive && !cam.hacked && get_distance(hero.x, hero.y, cam.x, cam.y) <= hero.radius * drag_distance {
+			camera_bug(cam)
+		}
 	}
 	c := computer_for_security_cameras
 	if !cameras_disabled && get_distance(hero.x, hero.y, c.x, c.y) <= hero.radius * 4 {

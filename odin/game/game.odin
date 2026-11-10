@@ -609,6 +609,9 @@ gameloop_security_cams :: proc(dt: f64) {
 	for cam in security_cameras {
 		if !cameras_disabled && cam.alive {
 			if !(cam.blind_until != 0 && clock_now() < cam.blind_until) do camera_swivel(cam, dt)
+		}
+		// a bugged camera only feeds the robbers' fog of war; it detects nothing
+		if !cameras_disabled && cam.alive && !cam.hacked {
 			if !cam.alarmed {
 				for j := 0; j < len(alarming_objects); j += 1 {
 					o := alarming_objects[j]
