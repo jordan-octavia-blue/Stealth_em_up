@@ -21,7 +21,7 @@ mouse: Point
 mouse_relative: Point
 
 Keys :: struct {
-	w, a, s, d, r, f, v, g, e, n, b, h, k3, k4, k5: bool,
+	w, a, s, d, r, f, v, g, e, n, b, h, q, k3, k4, k5: bool,
 	space, shift, lmb, rmb: bool,
 }
 keys: Keys
@@ -975,6 +975,7 @@ gameloop :: proc(dt: f64) {
 	sprite_prepare_for_draw(hero_last_seen)
 	with_car_driver(car_update_pre_step)
 	gameloop_guards(dt)
+	for_each_player(proc(dt: f64) { kick_hits() }, dt)
 	for_each_player(proc(dt: f64) {
 		sprint_knockback(hero, guards[:], keys.shift && hero_drag_target == nil)
 	}, dt)
@@ -1067,7 +1068,8 @@ player_step_progress :: proc(dt: f64) {
 player_step_move :: proc(dt: f64) {
 	if net_hero_is_client_driven(bound_player) {
 		net_host_apply_remote_position(bound_player)
-	} else {
+		kick_tick(hero)
+	} else if !kick_drive(hero) {
 		sprite_move_to_target(hero)
 	}
 	if hero.alive && hero.gun_out {

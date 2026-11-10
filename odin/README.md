@@ -113,6 +113,7 @@ The right-hand column names the TypeScript each file was ported from, which is i
 | `game/fog.odin` | the fog of war; visibility polygons are cut out with the stencil buffer. Off by default (`enable_los`) |
 | `game/effects.odin` | particles and the baked blood trail |
 | `game/car.odin` | the van and melee |
+| `game/kick.odin` | the running drop kick (Q): knockback, smashing doors, reinforced doors |
 | `game/grenades.odin` | weapons data and grenades |
 | `game/audio.odin` | the sound manager and the synthesized van engine |
 | `game/input.odin` | keyboard and mouse handlers |
