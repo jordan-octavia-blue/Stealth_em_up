@@ -1,12 +1,12 @@
 {
   "version": 1,
   "tiles": {
-    "1": { "material": "brick",   "hp": 60, "blocksVision": true,  "rubbleTile": 2 },
-    "3": { "material": "drywall", "hp": 15, "blocksVision": false, "rubbleTile": 2 },
-    "5": { "material": "wood",    "hp": 30, "blocksVision": true,  "rubbleTile": 2 },
-    "6": { "material": "wood",    "hp": 30, "blocksVision": true,  "rubbleTile": 2 },
-    "8": { "material": "concrete", "hp": 60, "blocksVision": true,  "rubbleTile": 2 },
-    "9": { "material": "concrete", "hp": 60, "blocksVision": true,  "rubbleTile": 2 },
-    "7": { "material": "glass",   "hp": 30, "blocksVision": false, "rubbleTile": 2 }
+    "1": { "material": "brick",   "hp": 60, "blocksVision": true,  "rubbleTile": 2, "vanDamage": 1, "vanPassSpeed": 0.35 },
+    "3": { "material": "drywall", "hp": 15, "blocksVision": false, "rubbleTile": 2, "vanDamage": 2, "vanPassSpeed": 0.7 },
+    "5": { "material": "wood",    "hp": 30, "blocksVision": true,  "rubbleTile": 2, "vanDamage": 1, "vanPassSpeed": 0.55 },
+    "6": { "material": "wood",    "hp": 30, "blocksVision": true,  "rubbleTile": 2, "vanDamage": 1, "vanPassSpeed": 0.55 },
+    "7": { "material": "glass",   "hp": 30, "blocksVision": false, "rubbleTile": 2, "vanDamage": 4, "vanPassSpeed": 0.85 },
+    "8": { "material": "concrete", "hp": 60, "blocksVision": true, "rubbleTile": 2, "vanDamage": 1, "vanPassSpeed": 0.35 },
+    "9": { "material": "concrete", "hp": 60, "blocksVision": true, "rubbleTile": 2, "vanDamage": 1, "vanPassSpeed": 0.35 }
   }
 }

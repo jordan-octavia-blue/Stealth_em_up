@@ -27,6 +27,10 @@ Tile_Def :: struct {
 	hp:          f64,
 	rubble_tile: int,
 	ok:          bool,
+	// How hard van impacts hit this tile ("vanDamage", a multiplier on the impact damage) and how much
+	// of its speed the van keeps when it smashes through ("vanPassSpeed", 0..1).
+	van_damage:     f64,
+	van_pass_speed: f64,
 }
 tile_defs: map[int]Tile_Def
 
@@ -52,7 +56,11 @@ load_tileset :: proc() -> bool {
 		o := t.(json.Object)
 		code := 0
 		for ch in key do code = code * 10 + int(ch - '0')
-		tile_defs[code] = {material_from_string(o["material"].(json.String)), jnum(o["hp"]), int(jnum(o["rubbleTile"])), true}
+		van_damage := 1.0
+		if v, vok := o["vanDamage"]; vok do van_damage = jnum(v)
+		van_pass := 0.5
+		if v, vok := o["vanPassSpeed"]; vok do van_pass = jnum(v)
+		tile_defs[code] = {material_from_string(o["material"].(json.String)), jnum(o["hp"]), int(jnum(o["rubbleTile"])), true, van_damage, van_pass}
 	}
 	return true
 }
@@ -188,6 +196,8 @@ Cell :: struct {
 	solid, blocks_vision, restricted, door: bool,
 	material:      Material,
 	hp, max_hp:    f64,
+	van_damage:    f64, // see Tile_Def
+	van_pass_speed: f64,
 	rubble_tile:   int,
 	image_number:  int,
 	rotate_sprite: f64,
@@ -264,6 +274,11 @@ grid_build :: proc(m: ^Map_Data) {
 			c.material = def.material
 			c.hp = def.hp
 			c.rubble_tile = def.rubble_tile
+			c.van_damage = def.van_damage
+			c.van_pass_speed = def.van_pass_speed
+		} else {
+			c.van_damage = 1
+			c.van_pass_speed = 0.5
 		}
 		if hp, ok := m.hp_overrides[i]; ok do c.hp = hp
 		c.max_hp = c.hp
