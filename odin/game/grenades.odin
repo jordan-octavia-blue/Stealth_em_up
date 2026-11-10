@@ -23,8 +23,8 @@ Throwable_Def :: struct {
 throwable_defs: map[string]Throwable_Def
 
 load_weapons :: proc() -> bool {
-	data, err := os.read_entire_file(asset_path("data/weapons.json"), context.allocator)
-	if err != nil do return false
+	data, ok := read_asset("data/weapons.json")
+	if !ok do return false
 	v, jerr := json.parse(data)
 	if jerr != nil do return false
 	root := v.(json.Object)

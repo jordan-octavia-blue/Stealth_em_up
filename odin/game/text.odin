@@ -31,11 +31,8 @@ font_atlas_w, font_atlas_h: int
 
 text_init :: proc() -> bool {
 	fs.Init(&font_ctx, 1024, 1024, .TOPLEFT)
-	data, err := os.read_entire_file(asset_path("odin/assets/fonts/LiberationSans-Regular.ttf"), context.allocator)
-	if err != nil {
-		data, err = os.read_entire_file("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", context.allocator)
-	}
-	if err != nil {
+	data, ok := read_asset("odin/assets/fonts/LiberationSans-Regular.ttf")
+	if !ok {
 		fmt.eprintln("font not found")
 		return false
 	}

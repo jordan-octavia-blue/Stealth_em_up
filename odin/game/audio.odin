@@ -128,8 +128,8 @@ audio_shutdown :: proc() {
 }
 
 load_wav :: proc(name: string) -> Clip {
-	data, err := os.read_entire_file(asset_path(concat2("odin/assets/sound/", name)), context.allocator)
-	if err != nil || len(data) < 44 do return {}
+	data, ok := read_asset(concat2("odin/assets/sound/", name))
+	if !ok || len(data) < 44 do return {}
 	defer delete(data)
 	channels := 1
 	rate := 44100

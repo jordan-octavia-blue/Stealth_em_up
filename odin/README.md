@@ -40,9 +40,14 @@ On the first build, the script clones sokol-odin at a pinned commit into `odin/t
 compiles the sokol C libraries, including the ALSA backend of sokol_audio. Set `SOKOL_ODIN_DIR` to use an
 existing checkout.
 
-The game reads its assets from the repo (`images/`, `movie_clips/`, `maps/`, `data/`) plus `odin/assets/`
-(sounds converted to WAV and the Liberation Sans font). It finds the repo root by searching upward from the
-working directory and from the executable.
+The game's assets (`images/`, `movie_clips/`, `maps/`, `data/`, plus `odin/assets/` with the WAV sounds and the
+Liberation Sans font) are compiled into the executable with `#load_directory` (`game/assets.odin`), so the exe
+runs on its own from any folder. When it is started inside a checkout (it finds the repo root by searching upward
+from the working directory and from the executable), it reads the files from disk instead, so map and
+`data/*.json` edits apply without a rebuild. A new asset folder has to be added to `embedded_dirs`.
+
+**Sharing a build:** send `stealth_em_up.exe` and `steam_api64.dll` from `odin\bin\`, kept in the same folder.
+The DLL is only needed for Steam co-op. CI uploads both as the `stealth_em_up-windows` artifact on every run.
 
 Set `STEALTH_AUTOSTART=1` to skip the menu.
 
