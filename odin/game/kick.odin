@@ -1,6 +1,6 @@
 package game
 
-// The running drop kick (Q while moving). The robber leaps in the direction they are running,
+// The running drop kick (Space while sprinting: Shift and a direction held). The robber leaps in the direction they are running,
 // lands, and gets back up:
 //
 //   .Air   KICK_AIR_MS of fixed-speed lunge. Input is ignored and the robber faces the kick.
@@ -35,6 +35,11 @@ KICK_DOOR_TINT :: 0x8a5a2b
 KICK_AIR_SCALE :: 1.25
 KICK_LAND_SCALE :: 0.9
 
+// Space kicks instead of interacting only while the robber is sprinting somewhere.
+kick_wanted :: proc() -> bool {
+	return keys.shift && (keys.w || keys.a || keys.s || keys.d)
+}
+
 // Starts a kick for the bound robber if they are running. Runs on the host for every robber
 // (a client's press is replayed there) and on a client for its own robber.
 kick_start :: proc() -> bool {
@@ -46,10 +51,7 @@ kick_start :: proc() -> bool {
 	else if keys.s do dy += 1
 	if keys.d do dx += 1
 	else if keys.a do dx -= 1
-	if dx == 0 && dy == 0 {
-		if bound_is_local() do new_floating_message("Get a running start!", h.x, h.y, 0xFFaa00)
-		return false
-	}
+	if dx == 0 && dy == 0 do return false
 	l := math.sqrt(dx * dx + dy * dy)
 	h.kick_dx = dx / l
 	h.kick_dy = dy / l

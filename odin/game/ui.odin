@@ -288,7 +288,7 @@ CONTROLS := [][2]string{
 	{"Pick up gun", "Right Click"},
 	{"Interact / lock-pick / bug camera", "Space"},
 	{"Drag body / choke out guard", "Hold Space"},
-	{"Running drop kick", "Q while moving"},
+	{"Running drop kick", "Space while sprinting"},
 	{"Plant bomb (5 s fuse)", "F"},
 	{"Frag / smoke / flash grenade", "3 / 4 / 5 (aims at mouse)"},
 	{"Spyglass", "P"},

@@ -21,7 +21,7 @@ mouse: Point
 mouse_relative: Point
 
 Keys :: struct {
-	w, a, s, d, r, f, v, g, e, n, b, h, q, k3, k4, k5: bool,
+	w, a, s, d, r, f, v, g, e, n, b, h, k3, k4, k5: bool,
 	space, shift, lmb, rmb: bool,
 }
 keys: Keys
