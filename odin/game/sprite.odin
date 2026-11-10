@@ -600,7 +600,7 @@ hero_kill :: proc(h: ^Sprite, from_x, from_y: f64) {
 		store_inc("loses")
 		net_on_game_over(false)
 	} else if h.player_id == local_player {
-		set_text(message_game_over, "You're down. Watching the crew...")
+		set_text(message_game_over, "You're down. Watching the crew ([Space] to switch).")
 	}
 	// a downed robber can still press Esc, but no longer acts
 	{

@@ -109,6 +109,7 @@ SPAWN_OFFSETS := [MAX_PLAYERS]Point{{0, 0}, {40, 0}, {-40, 0}, {0, 40}}
 players_reset :: proc() {
 	players = {}
 	bound_player = local_player
+	spectate_reset()
 }
 
 // Creates player i's robber at the spawn. Called from setup_map with the globals unbound.

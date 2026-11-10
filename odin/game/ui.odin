@@ -294,6 +294,7 @@ CONTROLS := [][2]string{
 	{"Enter / exit the van", "E (stand next to it)"},
 	{"Drive the van", "W A S D, Space = handbrake"},
 	{"Zoom", "Mouse Wheel"},
+	{"Watch next teammate (while down)", "Space"},
 	{"Debug: nav / physics / walls", "N / B / H"},
 	{"Back to this menu", "Esc"},
 }

@@ -930,6 +930,7 @@ net_client_queue_input :: proc(kind: u8, code: int) {
 }
 
 net_client_key_down :: proc(code: int) {
+	if spectate_on_key(code, true) do return
 	if code == 27 {
 		// a client leaving mid-heist leaves the crew (no rejoining a heist in progress)
 		net_leave()
@@ -951,6 +952,7 @@ net_client_key_down :: proc(code: int) {
 }
 
 net_client_key_up :: proc(code: int) {
+	if spectate_on_key(code, false) do return
 	net_client_track_key(code, false)
 	net_client_queue_input(1, code)
 }
@@ -1371,7 +1373,7 @@ net_client_apply_snapshot :: proc() {
 		if h.alive && !alive {
 			h.alive = false
 			physics_remove_actor(h)
-			if local do set_text(message_game_over, "You're down. Watching the crew...")
+			if local do set_text(message_game_over, "You're down. Watching the crew ([Space] to switch).")
 		}
 		h.masked = f & P_MASKED != 0
 		h.gun_out = f & P_GUN_OUT != 0

@@ -119,6 +119,7 @@ The right-hand column names the TypeScript each file was ported from, which is i
 | `game/effects.odin` | particles and the baked blood trail |
 | `game/car.odin` | the van and melee |
 | `game/kick.odin` | the running drop kick (Space while sprinting): knockback, smashing doors, reinforced doors |
+| `game/spectate.odin` | co-op: a downed robber's camera follows a living teammate (Space switches) |
 | `game/grenades.odin` | weapons data and grenades |
 | `game/audio.odin` | the sound manager and the synthesized van engine |
 | `game/input.odin` | keyboard and mouse handlers |

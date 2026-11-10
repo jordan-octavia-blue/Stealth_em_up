@@ -193,7 +193,8 @@ fog_update :: proc() {
 	segments := fog_current_occluders()
 	fog_poly_count = 0
 	view := Point{hero.x, hero.y}
-	if spyglass_valid do view = safe_origin(spyglass_pos.x, spyglass_pos.y, hero.x, hero.y)
+	if w := spectate_hero(); w != nil do view = {w.x, w.y}
+	else if spyglass_valid do view = safe_origin(spyglass_pos.x, spyglass_pos.y, hero.x, hero.y)
 	fog_view_origin = view
 	p := fog_poly_slot(0)
 	compute_visibility(p, view.x, view.y, segments, FOG_RADIUS)
