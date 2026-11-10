@@ -118,6 +118,8 @@ on_key_down :: proc(code: int) {
 			was_down := keys.space
 			keys.space = true
 			// Space while sprinting is the drop kick; otherwise it interacts as before
+			// a downed crewmate in reach takes priority over everything else Space does
+			if !was_down && revive_start() do return
 			if !was_down && kick_wanted() && kick_start() do return
 			if hero_drag_target == nil && !grid.a_door_is_being_unlocked {
 				if space_interact() do return
@@ -229,6 +231,7 @@ on_key_up :: proc(code: int) {
 		if hero_drag_target == nil do hero.speed = hero.speed_walk
 	case 32:
 		keys.space = false
+		if hero.reviving do revive_cancel()
 		if hero_drag_target != nil && !hero_drag_target.alive {
 			sprite_stop_dragging(hero_drag_target)
 			hero_drag_target = nil

@@ -36,8 +36,9 @@ KICK_AIR_SCALE :: 1.25
 KICK_LAND_SCALE :: 0.9
 
 // Space kicks instead of interacting only while the robber is sprinting somewhere.
+// Standing on a downed crewmate, Space revives instead (revive.odin).
 kick_wanted :: proc() -> bool {
-	return keys.shift && (keys.w || keys.a || keys.s || keys.d)
+	return keys.shift && (keys.w || keys.a || keys.s || keys.d) && revive_target() == nil
 }
 
 // Starts a kick for the bound robber if they are running. Runs on the host for every robber

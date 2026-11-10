@@ -12,7 +12,7 @@ import "core:path/filepath"
 
 // ---------------------------------------------------------------- circular progress bar
 
-Prog_Callback :: enum u8 { None, Reload, Mask, Unlock, Bomb_Timed, Bomb_Remote }
+Prog_Callback :: enum u8 { None, Reload, Mask, Unlock, Bomb_Timed, Bomb_Remote, Revive }
 
 prog_bar: struct {
 	graphics:               ^Node,
@@ -63,6 +63,8 @@ prog_run_callback :: proc() {
 		hero.planting_bomb = false
 		plant_bomb()
 		set_text(bomb_tooltip, "Press 'f' to detonate")
+	case .Revive:
+		revive_finish(prog_bar.cb_sprite)
 	}
 }
 
@@ -92,6 +94,7 @@ prog_stop :: proc() {
 	prog_bar.percent = 0
 	prog_bar.callback = .None
 	if hero.planting_bomb do hero.planting_bomb = false
+	hero.reviving = false
 }
 
 prog_hero_mask :: proc(time_to_finish: f64, param: bool) {
@@ -288,6 +291,7 @@ CONTROLS := [][2]string{
 	{"Pick up gun", "Right Click"},
 	{"Interact / lock-pick / bug camera", "Space"},
 	{"Drag body / choke out guard", "Hold Space"},
+	{"Revive a downed crewmate (co-op)", "Hold Space on their body"},
 	{"Running drop kick", "Space while sprinting"},
 	{"Frag / smoke / flash grenade", "3 / 4 / 5 (aims at mouse)"},
 	{"Spyglass", "P"},
