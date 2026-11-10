@@ -24,7 +24,7 @@ The keyboard and mouse handlers are the single source of truth: `odin/game/input
 `on_key_up`, `on_mouse_down`). The debug-overlay cycles are in `odin/game/debug.odin`.
 
 The player-facing list of controls is `CONTROLS` in `odin/game/ui.odin`, which the menu shows. When you add,
-remove, or rebind a key in `input.odin`, including the bomb (`F`) and the debug overlays (`N` / `B` / `H`), update
+remove, or rebind a key in `input.odin`, including the debug overlays (`N` / `B` / `H`), update
 that list to match so the two never drift apart.
 
 ## How and why guards get alerted
@@ -50,7 +50,7 @@ the alarm over:
 | Gun drawn | `hero.gun_out` | Weapon out (G key) |
 | On an off-limits tile | `hero.in_off_limits` | Standing on a tile flagged `restricted` |
 | Lockpicking a door | `hero.lockpicking` | During the lockpick channel (Space at a locked door) |
-| Planting a bomb | `hero.planting_bomb` | During the ~1.5 s bomb-plant channel (F key) |
+| Planting a bomb | `hero.planting_bomb` | During the ~1.5 s bomb-plant channel (no key plants a bomb at the moment) |
 | Carrying stolen loot | `hero.carry` | Holding the money |
 | Dragging or choking a body | `hero_drag_target` | Dragging a corpse or choking a guard |
 | Just rammed a wall or ran someone over in the van | `hero.van_suspicious_until` | The van hits a wall hard or mows a guard down (`odin/game/car.odin`). This is a short deadline set by `hero_mark_van_suspicious()` |
