@@ -289,7 +289,6 @@ CONTROLS := [][2]string{
 	{"Interact / lock-pick / bug camera", "Space"},
 	{"Drag body / choke out guard", "Hold Space"},
 	{"Running drop kick", "Space while sprinting"},
-	{"Plant bomb (5 s fuse)", "F"},
 	{"Frag / smoke / flash grenade", "3 / 4 / 5 (aims at mouse)"},
 	{"Spyglass", "P"},
 	{"Enter / exit the van", "E (stand next to it)"},

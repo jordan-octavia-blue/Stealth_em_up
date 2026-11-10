@@ -105,29 +105,6 @@ on_key_down :: proc(code: int) {
 			if !keys.h && bound_is_local() do local_message(fmt_join("Wall overlay: ", breach_debug_cycle()))
 			keys.h = true
 		}
-		if code == 70 {
-			if !keys.f && !bomb.sprite.visible {
-				if hero.ability_remote_bomb {
-					hero.moving = false
-					prog_reset(hero.x, hero.y, 1500, .Bomb_Remote)
-					hero.planting_bomb = true
-					bombs_left -= 1
-				} else if hero.ability_timed_bomb {
-					if bombs_left > 0 {
-						hero.moving = false
-						prog_reset(hero.x, hero.y, 1500, .Bomb_Timed)
-						hero.planting_bomb = true
-						bombs_left -= 1
-					} else {
-						new_floating_message("No Bombs Left", hero.x, hero.y, 0xFFaa00)
-					}
-				}
-			}
-			if !keys.f && bomb.sprite.visible {
-				if hero.ability_remote_bomb do set_bomb(500)
-			}
-			keys.f = true
-		}
 		if code == 86 {
 			if !keys.v do prog_hero_mask(hero.ability_toggle_mask_speed, !hero.masked)
 			keys.v = true
@@ -233,7 +210,6 @@ on_key_up :: proc(code: int) {
 	case 65: keys.a = false
 	case 83: keys.s = false
 	case 68: keys.d = false
-	case 70: keys.f = false
 	case 71: keys.g = false
 	case 69: keys.e = false
 	case 82: keys.r = false
