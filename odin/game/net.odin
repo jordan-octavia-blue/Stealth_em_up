@@ -1446,6 +1446,7 @@ net_client_apply_snapshot :: proc() {
 		c.rad = rad
 		c.alive = f & 1 != 0
 		c.hacked = f & 2 != 0
+		c.sprite.tint = c.hacked && c.alive ? CAMERA_BUGGED_TINT : 0xFFFFFF
 		if tx := tex_of(t); tx != nil do c.sprite.tex = tx
 	}
 	if tx := tex_of(r_u8(&r)); tx != nil do computer_for_security_cameras.sprite.tex = tx

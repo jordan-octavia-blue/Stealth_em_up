@@ -809,8 +809,24 @@ camera_swivel :: proc(s: ^Sprite, dt: f64) {
 	s.rad = s.cam_rotation
 }
 
+// Bugging a camera turns it to the robbers' side: it stops detecting anyone
+// (gameloop_security_cams skips it) but keeps swivelling and feeds the fog of war.
+// It shows the "off" texture with a green tint so it reads apart from cameras the
+// computer switched off. Clients derive the tint from the snapshot's hacked flag.
+CAMERA_BUGGED_TINT :: u32(0x66FF88)
+
+camera_bug :: proc(s: ^Sprite) {
+	s.hacked = true
+	s.alarmed = false
+	s.target = null_point()
+	s.sprite.tex = img_cam_off
+	s.sprite.tint = CAMERA_BUGGED_TINT
+	new_message("Camera bugged: it can no longer see you.")
+}
+
 camera_kill :: proc(s: ^Sprite) {
 	s.sprite.tex = img_cam_broken
+	s.sprite.tint = 0xFFFFFF
 	s.alive = false
 	s.target = null_point()
 	append(&alarming_objects, s)
@@ -823,7 +839,7 @@ camera_see_alarming_object :: proc(s: ^Sprite, ox, oy: f64) {
 		s.target = new_point(ox, oy)
 		clock_after(2000, proc(data: rawptr, arg: int) {
 			s := cast(^Sprite)data
-			if s.alive {
+			if s.alive && !s.hacked {
 				new_message("All the other guards are on alert!")
 				alert_all_guards()
 			}
