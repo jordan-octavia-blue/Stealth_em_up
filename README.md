@@ -1,56 +1,36 @@
 Stealth_em_up
 =============
 
-## Live Url
-/game.html?volume=1.0&level=bank_1
+A top-down stealth heist game. Grab the loot, get in the van, and drive to the green escape zone.
 
-or
+The game is written in [Odin](https://odin-lang.org) on [sokol](https://github.com/floooh/sokol-odin). It started
+as a JavaScript/Pixi browser game, which was removed once this port became the main build. That version is
+still in git history.
 
-https://stealth-em-up.jordanoleary.me/game.html?volume=1.0&level=bank_1
+## Build and run
 
-## How to run
+**Windows:** run `odin\build.bat run` from the repo root. You need `odin` and `git` on PATH, plus the
+Visual Studio C++ build tools, which Odin already needs.
 
-```
-npm install
-npm run dev      # then open http://localhost:5173/game.html?volume=1.0&level=bank_1
-```
+**Linux:** run `./odin/build.sh run`. You need `odin`, a C compiler and the X11/GL/ALSA headers. The script
+tells you what's missing.
 
-Other scripts:
+The first build fetches sokol and compiles its C libraries once. See [`odin/README.md`](odin/README.md) for
+details, the code layout and controls.
 
-| | |
-|---|---|
-| `npm run build` | production build into `dist/` |
-| `npm run preview` | serve the production build |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Vitest (`npm run test:watch` to keep it running) |
+## Co-op
+
+Two to four robbers can pull the heist together over Steam. Click **Host Co-op** in the menu, invite friends from
+the Steam overlay, then **Start Heist**. Steam has to be running. Until the game has its own Steam app ID it uses
+Valve's test app (480); set `STEAM_APP_ID` to override. See [`odin/README.md`](odin/README.md#co-op).
 
 ## Layout
 
-- `src/` — the game. `src/game.ts` is the `game.html` entry; `src/menu.ts` is `menu.html`'s.
-- `src/legacy/` — the original ES5 files, converted to ES modules but otherwise
-  untouched. They still share state through `window`; `src/legacy-bridge.ts` and
-  `src/legacy-globals.d.ts` document and type that contract, and both shrink as
-  subsystems get extracted (see `docs/SYSTEMS_ROADMAP.md`).
-- `bin/`, `images/`, `sound/`, `maps/`, `movie_clips/`, `icons/` — runtime assets, loaded
-  by plain relative URL and copied verbatim into `dist/` by a small plugin in
-  `vite.config.ts`.
-- `nw-package.json` — the old nw.js 0.12.2 app manifest, kept for reference only.
+- `odin/`: the game (`odin/game/`), the physics engine (`odin/physics/`), build scripts, sounds and font.
+- `images/`, `movie_clips/`, `maps/`, `data/`: runtime assets, read from the repo at startup.
+- `maps/src/`: ASCII sources for the heists; `python3 maps/build_maps.py` turns them into `.jomap` files.
+- `sound/`: the original audio files. The game plays the WAV conversions in `odin/assets/sound/`.
+- `working_files/`: Tiled sources for the maps.
 
-## Todo
-- raycasting problem is due to the offset, but the offset is necessary to properly sort the points
-
-## Optimize:
-* Anything that doesn't need to have its objective x and y calculated independently should be a part of a parent sprite.  Then the sprite's xy is calculated and all the children aren't.
-* Increase the usuable size of maps by turning off .visible for cells not in view?
-
-## Notes:
-* SpriteBatch is a super charged display object container
-* Setting the CacheAsBitmap flag makes a display object's content (children) be rendered to a texture, and then that texture is drawn.  With CacheAsBitmap on, children's rotation (for example) is excluded.
-
-* Drag code is updated in CodePractice repo.
-* You can use different gameLoops for different game states.
-
-## Terms:
-- `LOS` Line of Sight (fog of war)
-    - The starburst is what is used to calculate the LOS shade
-- `True Point` is the point that the ray is sent to, but the end of the raycast may go beyond it
+## Terms
+- `LOS`: line of sight, which drives the fog of war. The shade is off by default (`enable_los` in `odin/game/fog.odin`).

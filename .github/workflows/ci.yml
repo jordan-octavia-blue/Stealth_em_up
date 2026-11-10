@@ -8,23 +8,27 @@ on:
   pull_request:
 
 jobs:
-  check:
+  linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxi-dev libxcursor-dev libgl-dev libasound2-dev
+      - uses: laytan/setup-odin@v2
         with:
-          node-version: 22
-          cache: npm
+          release: dev-2026-11
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build
+        run: ./odin/build.sh
 
-      - run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Unit tests
-        run: npm test
-
-      - name: Production build
-        run: npm run build
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: laytan/setup-odin@v2
+        with:
+          release: dev-2026-11
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build
+        shell: cmd
+        run: odin\build.bat

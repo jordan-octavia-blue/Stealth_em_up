@@ -1,3 +1,3 @@
-node_modules/
-dist/
-output/
+odin/third_party/
+odin/build/
+odin/bin/
