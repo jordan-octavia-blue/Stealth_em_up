@@ -89,6 +89,9 @@ Car_Contact :: struct {
 	owner:    ^Sprite,
 	cell:     int,
 	speed:    f64,
+	car:      ^ph.Body,
+	car_v:    ph.Vec2, // the car's velocity before this step's solve, in m/s
+	car_w:    f64,     // and its angular velocity
 }
 
 Ray_Hit :: struct {
@@ -357,6 +360,12 @@ physics_teleport_car :: proc(owner: ^Sprite, x, y, angle: f64) {
 	owner.y = y
 }
 
+// Smash-through: put the van back at a share of the speed it had before it hit a tile that broke.
+physics_restore_car_velocity :: proc(body: ^ph.Body, v: ph.Vec2, w, keep: f64) {
+	ph.body_set_linear_velocity(body, V(v.x * keep, v.y * keep))
+	ph.body_set_angular_velocity(body, w * keep)
+}
+
 // Returns this step's contacts; the caller must not keep the slice past the next step.
 physics_drain_car_contacts :: proc() -> []Car_Contact {
 	if len(physics.car_contacts) == 0 do return nil
@@ -568,6 +577,9 @@ phys_on_contact :: proc(c: ^ph.Contact, begin: bool) {
 				owner = is_actor ? cast(^Sprite)other.owner : nil,
 				cell = is_cell ? other.cell : -1,
 				speed = math.sqrt(dx * dx + dy * dy),
+				car = car_f.body,
+				car_v = cv,
+				car_w = car_f.body.angular_velocity,
 			})
 		}
 	}

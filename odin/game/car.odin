@@ -327,15 +327,33 @@ car_update_post_step :: proc(dt_ms: f64) {
 	// resolveCarContacts
 	contacts := physics_drain_car_contacts()
 	driving := ok ? st.speed : 0
+	// Tiles the van hits take damage scaled by their "vanDamage" (glass shatters on a light bump, brick
+	// takes a few hard rams). If every tile it hit hard this step broke, the van smashes through and keeps
+	// part of its speed ("vanPassSpeed") instead of stopping dead on a wall that is no longer there.
+	smashed := false
+	blocked := false
+	keep := 1.0
+	smash_contact: Car_Contact
 	for c in contacts {
 		if c.is_actor && c.owner != nil {
 			if c.owner.alive && driving >= RUN_OVER_SPEED_PX do car_run_over(c.owner, st, ok)
 		} else if !c.is_actor && c.cell >= 0 && c.speed >= BREACH_SPEED_PX {
 			if car.active do hero_mark_van_suspicious(players[car.driver].hero, VAN_SUSPICION_MS)
-			amount := min(c.speed * BREACH_DAMAGE_PER_SPEED, BREACH_DAMAGE_MAX)
+			cell := grid.cells[c.cell]
+			was_solid := cell.solid || cell.door
+			amount := min(c.speed * BREACH_DAMAGE_PER_SPEED, BREACH_DAMAGE_MAX) * cell.van_damage
 			grid_damage_cell(c.cell, amount, .Car)
+			if !was_solid do continue
+			if cell.solid || cell.door {
+				blocked = true
+			} else {
+				smashed = true
+				keep = min(keep, cell.van_pass_speed)
+				smash_contact = c
+			}
 		}
 	}
+	if smashed && !blocked do physics_restore_car_velocity(smash_contact.car, smash_contact.car_v, smash_contact.car_w, keep)
 	// advanceKnockbacks
 	dt := dt_ms / 1000
 	for i := len(car.knockbacks) - 1; i >= 0; i -= 1 {
