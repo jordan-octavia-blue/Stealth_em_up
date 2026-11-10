@@ -23,7 +23,7 @@ import "core:strings"
 import "core:os"
 import "core:mem"
 
-NET_VERSION :: 3
+NET_VERSION :: 4
 SNAPSHOT_EVERY_TICKS :: 2
 PEER_TIMEOUT_MS :: 10000.0
 HELLO_RESEND_MS :: 500.0
@@ -1241,6 +1241,7 @@ client_gameloop :: proc(dt: f64) {
 		player_switch(prev)
 	}
 	nav_debug_draw()
+	revive_tooltip()
 	gameloop_messages_and_tooltip(dt)
 	for d in doodads do prepare_simple(d.sprite, d.x, d.y, d.rad)
 	for d in gun_drops do prepare_simple(d.sprite, d.x, d.y, d.rad)
@@ -1374,6 +1375,18 @@ net_client_apply_snapshot :: proc() {
 			h.alive = false
 			physics_remove_actor(h)
 			if local do set_text(message_game_over, "You're down. Watching the crew ([Space] to switch).")
+		} else if !h.alive && alive {
+			// a crewmate revived this robber on the host (revive.odin)
+			h.alive = true
+			h.x = x
+			h.y = y
+			if !h.in_car && !physics_has_actor(h) do physics_add_hero(h, h.radius)
+			if physics_has_actor(h) do physics_teleport(h, x, y)
+			if local {
+				set_text(message_game_over, "")
+				keys = {}
+				spectate_reset() // the camera comes back to us
+			}
 		}
 		h.masked = f & P_MASKED != 0
 		h.gun_out = f & P_GUN_OUT != 0
@@ -1391,6 +1404,7 @@ net_client_apply_snapshot :: proc() {
 		h.carry = f & P_CARRY != 0 && len(loot) > 0 ? loot[0] : nil
 		h.sprite.visible = f & P_VISIBLE != 0
 		if f & P_HEAD == 0 && h.sprite_head.parent != nil do remove_child(h.sprite, h.sprite_head)
+		else if f & P_HEAD != 0 && h.sprite_head.parent == nil do add_child(h.sprite, h.sprite_head)
 		if t := tex_of(body); t != nil do h.sprite_body.tex = t
 		if t := tex_of(head); t != nil do h.sprite_head.tex = t
 		if g := gun_by_index(gun); g != nil && (h.gun == nil || h.gun.name != g.name) {

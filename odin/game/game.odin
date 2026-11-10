@@ -997,6 +997,7 @@ gameloop :: proc(dt: f64) {
 	gameloop_doors(dt)
 	gameloop_dragtarget(dt)
 	nav_debug_draw()
+	revive_tooltip()
 	gameloop_messages_and_tooltip(dt)
 	for d in doodads do prepare_simple(d.sprite, d.x, d.y, d.rad)
 	for i := 0; i < len(gun_drops); i += 1 {

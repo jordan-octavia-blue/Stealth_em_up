@@ -66,7 +66,9 @@ Two to four robbers in one heist. The menu has **Host Co-op** (Steam) and **Host
   transport has no reliability layer, so keep it to a LAN or one machine.
 
 Rules: there is no joining a heist in progress. A downed robber drops the loot and spectates, and the heist is
-lost when every robber is down. The van seats a driver plus passengers. Esc takes the host's whole crew back to
+lost when every robber is down. A crewmate who stands on a downed robber and holds Space for 3 s revives them
+where they fell, with their gear (`game/revive.odin`); walking off the body or letting go cancels it, and guards
+treat a revive like a lock-pick. The van seats a driver plus passengers. Esc takes the host's whole crew back to
 the lobby; a client's Esc leaves the crew.
 
 How it works (`game/players.odin`, `game/net.odin`, `game/net_transport.odin`):
@@ -118,6 +120,7 @@ The right-hand column names the TypeScript each file was ported from, which is i
 | `game/fog.odin` | the fog of war; visibility polygons are cut out with the stencil buffer. Off by default (`enable_los`) |
 | `game/effects.odin` | particles and the baked blood trail |
 | `game/car.odin` | the van and melee |
+| `game/revive.odin` | co-op revive: hold Space on a downed crewmate's body |
 | `game/kick.odin` | the running drop kick (Space while sprinting): knockback, smashing doors, reinforced doors |
 | `game/spectate.odin` | co-op: a downed robber's camera follows a living teammate (Space switches) |
 | `game/grenades.odin` | weapons data and grenades |

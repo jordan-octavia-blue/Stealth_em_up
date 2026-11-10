@@ -211,6 +211,7 @@ Sprite :: struct {
 	masked, gun_out:            bool,
 	in_off_limits, lockpicking: bool,
 	planting_bomb, in_car:      bool,
+	reviving:                   bool, // channelling a co-op revive (revive.odin)
 	carry:                      ^Sprite,
 	spyglass_distance:          f64,
 	spyglass_equipped:          bool,
@@ -525,7 +526,7 @@ new_hero :: proc(body_tex: ^Texture, speed_walk, speed_sprint: f64) -> ^Sprite {
 }
 
 hero_will_cause_alert :: proc(h: ^Sprite) -> bool {
-	return h.masked || h.gun_out || h.in_off_limits || h.lockpicking || h.planting_bomb || h.carry != nil ||
+	return h.masked || h.gun_out || h.in_off_limits || h.lockpicking || h.planting_bomb || h.reviving || h.carry != nil ||
 		player_drag_target(h.player_id) != nil || h.kick_state == .Air ||
 		clock_now() < max(h.van_suspicious_until, h.kick_suspicious_until)
 }
@@ -606,6 +607,10 @@ hero_kill :: proc(h: ^Sprite, from_x, from_y: f64) {
 	{
 		prev := player_switch(h.player_id)
 		remove_handlers(true)
+		// whatever they were channelling (a revive, a lock, a reload) dies with them
+		if prog_bar.visible do prog_stop()
+		if h.lockpicking do grid.a_door_is_being_unlocked = false
+		h.lockpicking = false
 		player_switch(prev)
 	}
 	splatter_angle := angle_between_points(from_x, from_y, h.x, h.y)

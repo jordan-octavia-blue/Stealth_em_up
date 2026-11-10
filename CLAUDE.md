@@ -51,6 +51,7 @@ the alarm over:
 | On an off-limits tile | `hero.in_off_limits` | Standing on a tile flagged `restricted` |
 | Lockpicking a door | `hero.lockpicking` | During the lockpick channel (Space at a locked door) |
 | Planting a bomb | `hero.planting_bomb` | During the ~1.5 s bomb-plant channel (no key plants a bomb at the moment) |
+| Reviving a crewmate | `hero.reviving` | During the 3 s co-op revive channel (hold Space on a downed robber's body, `odin/game/revive.odin`) |
 | Carrying stolen loot | `hero.carry` | Holding the money |
 | Dragging or choking a body | `hero_drag_target` | Dragging a corpse or choking a guard |
 | Just rammed a wall or ran someone over in the van | `hero.van_suspicious_until` | The van hits a wall hard or mows a guard down (`odin/game/car.odin`). This is a short deadline set by `hero_mark_van_suspicious()` |
@@ -177,6 +178,9 @@ What matters when changing gameplay code:
   player is *bound*. Code that should act for every robber loops over `players` with `player_switch(i)` (and
   switches back). Between per-player sections the globals hold the local player.
 - Guards and cameras pick which robber to react to with `pick_seen_hero`. Face knowledge is per player.
+- A downed robber can be revived (`odin/game/revive.odin`): Space on their body runs a `.Revive` progress bar on the
+  host, and `hero_revive` undoes `hero_kill`. Clients see it through the snapshot (`P_ALIVE`, `P_HEAD`, the bar).
+  Space priority: revive, then the drop kick (`kick_wanted` yields to a revive), then lock-pick / drag / choke.
 - A new one-shot effect (a sound, particles, a message) reaches clients only through an emitter in `net.odin`
   (`net_ev_*`), usually called at the top of the effect proc. If a client already reproduces it from another
   event, wrap the host's call in `net.mute += 1` / `net.mute -= 1`.
