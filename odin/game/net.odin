@@ -962,11 +962,10 @@ net_client_track_key :: proc(code: int, down: bool) {
 	case 83: keys.s = down
 	case 68: keys.d = down
 	case 16: keys.shift = down
-	case 32: keys.space = down
-	case 81:
-		// we walk our own robber, so the lunge starts here; the host decides what it hits
-		if down && !keys.q do kick_start()
-		keys.q = down
+	case 32:
+		// we walk our own robber, so a drop kick's lunge starts here; the host decides what it hits
+		if down && !keys.space && kick_wanted() do kick_start()
+		keys.space = down
 	}
 	if hero != nil && hero.alive do hero_move_animation_check()
 }

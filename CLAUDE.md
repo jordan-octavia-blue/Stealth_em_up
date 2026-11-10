@@ -52,7 +52,7 @@ the alarm over:
 | Carrying stolen loot | `hero.carry` | Holding the money |
 | Dragging or choking a body | `hero_drag_target` | Dragging a corpse or choking a guard |
 | Just rammed a wall or ran someone over in the van | `hero.van_suspicious_until` | The van hits a wall hard or mows a guard down (`odin/game/car.odin`). This is a short deadline set by `hero_mark_van_suspicious()` |
-| Mid drop kick, or just landed one | `hero.kick_state`, `hero.kick_suspicious_until` | In the air during a drop kick (Q), and for ~2.5 s after it hits a guard, body, door or wall (`odin/game/kick.odin`) |
+| Mid drop kick, or just landed one | `hero.kick_state`, `hero.kick_suspicious_until` | In the air during a drop kick (Space while sprinting), and for ~2.5 s after it hits a guard, body, door or wall (`odin/game/kick.odin`) |
 
 The mask is protection **until a guard sees your face unmasked**. Once a guard learns that robber's face (`guard_learn_face`, a per-player bit in `knows_face`), the mask
 no longer hides you from that guard.
@@ -138,7 +138,8 @@ runs, and then its effect fires.
 
 ### The running drop kick
 
-`Q` while holding a direction (`kick_start` in `odin/game/kick.odin`). The robber lunges ~170 px, then lies on
+`Space` while sprinting, i.e. Shift and a direction held (`kick_wanted` / `kick_start` in `odin/game/kick.odin`).
+Space without sprinting still interacts (lock-pick, drag, choke), so running at a door kicks it instead of picking it. The robber lunges ~170 px, then lies on
 the floor briefly. The host decides hits (`kick_hits`): a living guard is launched backwards and stunned (the melee
 stun from `car.odin`) and becomes alarmed after the usual reaction delay; a dead body slides back; a closed door is
 smashed open for good, locked or not, unless it is **reinforced** (map tiles 8 / 9, `R` / `H` in `maps/src/`). A

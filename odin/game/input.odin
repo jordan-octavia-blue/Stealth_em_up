@@ -24,7 +24,6 @@ sapp_to_keycode :: proc(k: sapp.Keycode) -> int {
 	case .H: return 72
 	case .F: return 70
 	case .V: return 86
-	case .Q: return 81
 	case ._3: return 51
 	case ._4: return 52
 	case ._5: return 53
@@ -129,10 +128,6 @@ on_key_down :: proc(code: int) {
 			}
 			keys.f = true
 		}
-		if code == 81 {
-			if !keys.q do kick_start()
-			keys.q = true
-		}
 		if code == 86 {
 			if !keys.v do prog_hero_mask(hero.ability_toggle_mask_speed, !hero.masked)
 			keys.v = true
@@ -142,7 +137,10 @@ on_key_down :: proc(code: int) {
 			if hero_drag_target == nil do hero.speed = hero.speed_sprint
 		}
 		if code == 32 {
+			was_down := keys.space
 			keys.space = true
+			// Space while sprinting is the drop kick; otherwise it interacts as before
+			if !was_down && kick_wanted() && kick_start() do return
 			if hero_drag_target == nil && !grid.a_door_is_being_unlocked {
 				if space_interact() do return
 			}
@@ -246,7 +244,6 @@ on_key_up :: proc(code: int) {
 	case 52: keys.k4 = false
 	case 53: keys.k5 = false
 	case 86: keys.v = false
-	case 81: keys.q = false
 	case 16:
 		keys.shift = false
 		if hero_drag_target == nil do hero.speed = hero.speed_walk
